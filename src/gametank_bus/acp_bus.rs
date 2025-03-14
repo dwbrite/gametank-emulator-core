@@ -1,4 +1,5 @@
-use tracing::{error};
+use alloc::boxed::Box;
+use log::{error};
 use w65c02s::{System, W65C02S};
 use crate::gametank_bus::Bus;
 

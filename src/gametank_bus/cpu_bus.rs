@@ -1,8 +1,8 @@
+use alloc::boxed::Box;
+use core::cell::Ref;
 use w65c02s::{System, W65C02S};
-use rand::{thread_rng, Rng};
-use std::cell::Ref;
-use tracing::{debug, warn};
-use crate::cartridges::cart2m::Cartridge2M;
+use rand::{Rng};
+use log::{debug, warn};
 use crate::cartridges::CartridgeType;
 use crate::gametank_bus::Bus;
 use crate::gametank_bus::reg_system_control::*;
@@ -13,7 +13,7 @@ use crate::gametank_bus::reg_blitter::{BlitStart, BlitterRegisters};
 use crate::gametank_bus::reg_etc::{new_framebuffer, BankingRegister, BlitterFlags, FrameBuffer, GraphicsMemoryMap, SharedFrameBuffer};
 use crate::gametank_bus::reg_system_control::*;
 
-const CURRENT_GAME: &[u8] = &[0u8; 32_768];
+const CURRENT_GAME: &[u8] = include_bytes!("../cubicle.gtr");
 
 #[derive(Copy, Clone, Debug)]
 pub enum ByteDecorator {
@@ -49,7 +49,7 @@ pub struct CpuBus {
 
 impl Default for CpuBus {
     fn default() -> Self {
-        let mut rng = thread_rng();
+        // TODO: re-add rng to initial framebuffer?
 
         let bus = Self {
             cycles: 0,
@@ -75,20 +75,20 @@ impl Default for CpuBus {
                 },
                 color: 0b101_00_000, // offwhite
             },
-            ram_banks: Box::new([[0; 0x2000]; 4]),
-            framebuffers: [new_framebuffer(0x00), new_framebuffer(0xFF)],
-            vram_banks: Box::new([[0; 256*256]; 8]),
+            ram_banks: Box::new([[0; 0x2000]; 4]), // 16k ram
+            framebuffers: [new_framebuffer(0x00), new_framebuffer(0xFF)], // 128*128*2 = 32k framebuffer
+            vram_banks: Box::new([[0; 256*256]; 8]), // 64k * 8 = 512k
             cartridge: CartridgeType::from_slice(CURRENT_GAME),
-            aram: Some(Box::new([0; 0x1000])),
+            aram: Some(Box::new([0; 0x1000])), // audio ram is 2k
             vram_quad_written: [false; 32],
         };
 
         for p in bus.framebuffers[0].borrow_mut().iter_mut() {
-            *p = rng.gen();
+            // *p = rng.gen();
         }
 
         for p in bus.framebuffers[1].borrow_mut().iter_mut() {
-            *p = rng.gen();
+            // *p = rng.gen();
         }
 
         bus
@@ -102,29 +102,29 @@ impl CpuBus {
     }
 
     fn update_flash_shift_register(&mut self, next_val: u8) {
-        match &mut self.cartridge {
-            CartridgeType::Cart2m(cartridge) => {
-                // For now, assuming that if we're using Flash2M hardware, we're behaving ourselves
-                let old_val = self.system_control.via_regs[VIA_IORA]; // Get the previous value from the VIA
-                let rising_bits = next_val & !old_val;
-
-                if rising_bits & VIA_SPI_BIT_CLK != 0 {
-                    cartridge.bank_shifter <<= 1; // Shift left
-                    cartridge.bank_shifter &= 0xFE; // Ensure the last bit is cleared
-                    cartridge.bank_shifter |= ((old_val & VIA_SPI_BIT_MOSI) != 0) as u8; // Set the last bit based on MOSI
-                } else if rising_bits & VIA_SPI_BIT_CS != 0 {
-                    // Flash cart CS is connected to latch clock
-                    if (cartridge.bank_mask ^ cartridge.bank_shifter as u16) & 0x80 != 0 {
-                        // TODO: support saving
-                        // self.save_nvram(); // Assuming this is defined elsewhere or is a method within CpuBus
-                        warn!("Saving is not yet supported");
-                    }
-                    cartridge.bank_mask = cartridge.bank_shifter as u16; // Update the bank mask
-                    debug!("Flash bank mask set to 0x{:x}", cartridge.bank_mask);
-                }
-            },
-            _ => {} // do nothing
-        }
+        // match &mut self.cartridge {
+        //     CartridgeType::Cart2m(cartridge) => {
+        //         // For now, assuming that if we're using Flash2M hardware, we're behaving ourselves
+        //         let old_val = self.system_control.via_regs[VIA_IORA]; // Get the previous value from the VIA
+        //         let rising_bits = next_val & !old_val;
+        //
+        //         if rising_bits & VIA_SPI_BIT_CLK != 0 {
+        //             cartridge.bank_shifter <<= 1; // Shift left
+        //             cartridge.bank_shifter &= 0xFE; // Ensure the last bit is cleared
+        //             cartridge.bank_shifter |= ((old_val & VIA_SPI_BIT_MOSI) != 0) as u8; // Set the last bit based on MOSI
+        //         } else if rising_bits & VIA_SPI_BIT_CS != 0 {
+        //             // Flash cart CS is connected to latch clock
+        //             if (cartridge.bank_mask ^ cartridge.bank_shifter as u16) & 0x80 != 0 {
+        //                 // TODO: support saving
+        //                 // self.save_nvram(); // Assuming this is defined elsewhere or is a method within CpuBus
+        //                 warn!("Saving is not yet supported");
+        //             }
+        //             cartridge.bank_mask = cartridge.bank_shifter as u16; // Update the bank mask
+        //             debug!("Flash bank mask set to 0x{:x}", cartridge.bank_mask);
+        //         }
+        //     },
+        //     _ => {} // do nothing
+        // }
     }
 
     pub fn write_byte(&mut self, address: u16, data: u8) {

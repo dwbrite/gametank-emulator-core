@@ -1,12 +1,14 @@
+use alloc::vec::Vec;
 use w65c02s::W65C02S;
-use std::collections::HashMap;
-use tracing::{debug, error, warn};
+// use core::collections::HashMap;
+use log::{debug, error, info, warn};
 use w65c02s::State::AwaitingInterrupt;
-use std::fmt::{Debug, Formatter};
-use std::fs::File;
-use std::io::Read;
-use std::path::PathBuf;
+use core::fmt::{Debug, Formatter};
+// use core::fs::File;
+// use core::io::Read;
+// use core::path::PathBuf;
 use bytemuck::bytes_of;
+use heapless::{FnvIndexMap};
 use rtrb::PushError;
 use crate::blitter::Blitter;
 use crate::cartridges::CartridgeType;
@@ -55,7 +57,7 @@ pub struct Emulator<Clock: TimeDaemon> {
     pub play_state: PlayState,
     pub wait_counter: u64,
 
-    pub input_state: HashMap<InputCommand, KeyState>,
+    pub input_state: FnvIndexMap<InputCommand, KeyState, 32>, // capacity of 32 entries
 
     pub clock: Clock,
 }
@@ -75,7 +77,7 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
 }
 
 impl <Clock: TimeDaemon> Debug for Emulator<Clock> {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> core::fmt::Result {
         f.debug_struct("Emulator")
             .field("cpu_bus", &self.cpu_bus)
             .field("acp_bus", &self.acp_bus)
@@ -100,7 +102,12 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
     pub fn init(clock: Clock, audio_producer: rtrb::Producer<u8>) -> Self {
         let play_state = WasmInit;
 
+        info!("pre-bus");
+
         let mut bus = CpuBus::default();
+
+        info!("post-bus");
+
         let mut cpu = W65C02S::new();
         cpu.step(&mut bus); // take one initial step, to get through the reset vector
         let acp = W65C02S::new();
@@ -144,7 +151,6 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
             return
         }
 
-        // web redraw
         let now_ms = self.clock.get_now_ms();
         let mut elapsed_ms = now_ms - self.last_emu_tick;
 
@@ -163,14 +169,11 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
                 self.wait_counter += 1;
                 // get cpu's current asm code
             } else if self.wait_counter > 0 {
-                // warn!("waited {} cycles", self.wait_counter);
+                warn!("waited {} cycles", self.wait_counter);
                 self.wait_counter = 0;
             }
 
             let _ = self.cpu.step(&mut self.cpu_bus);
-            // clear interrupts after a step
-            // self.cpu.set_nmi(false);
-            // self.cpu.set_irq(false);
 
             let cpu_cycles = self.cpu_bus.clear_cycles() as i32;
             remaining_cycles -= cpu_cycles;
@@ -179,7 +182,7 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
 
             // pass aram to acp
             if self.cpu_bus.system_control.acp_enabled() {
-                self.run_acp(&mut acp_cycle_accumulator);
+                // self.run_acp(&mut acp_cycle_accumulator);
             }
 
             // blit
@@ -203,7 +206,7 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
         self.last_emu_tick = now_ms;
 
         if !is_web && (now_ms - self.last_render_time) >= 16.67 {
-            debug!("time since last render: {}", now_ms - self.last_render_time);
+            warn!("time since last render: {}", now_ms - self.last_render_time);
             self.last_render_time = now_ms;
         }
     }
@@ -251,7 +254,7 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
     }
 
     pub fn set_input_state(&mut self, input_command: InputCommand, state: KeyState) {
-        self.input_state.insert(input_command, state);
+        self.input_state.insert(input_command, state).expect("shit's full dog ://");
     }
 
     fn process_inputs(&mut self) {
@@ -263,8 +266,8 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
 
         for key in &keys {
             match key {
-                Controller1(button) => { self.set_gamepad_input(0, key, button); }
-                Controller2(button) => { self.set_gamepad_input(1, key, button); }
+                Controller1(button) => { self.set_gamepad_input(0, &key, &button); }
+                Controller2(button) => { self.set_gamepad_input(1, &key, &button); }
                 PlayPause => {
                     if self.input_state[key] == JustReleased {
                         match self.play_state {
@@ -288,7 +291,7 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
                     self.blitter = Blitter::default();
                 }
             }
-            self.input_state.insert(*key, self.input_state[key].update());
+            self.input_state.insert(*key, self.input_state[key].update()).expect("shit's full dog ://");
         }
     }
     fn set_gamepad_input(&mut self, gamepad: usize, key: &InputCommand, button: &ControllerButton) {

@@ -1,4 +1,5 @@
-use std::cell::RefCell;
+use alloc::boxed::Box;
+use core::cell::RefCell;
 use bitfield::bitfield;
 bitfield!{
     pub struct BankingRegister(u8);

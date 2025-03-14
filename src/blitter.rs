@@ -1,6 +1,5 @@
-use std::intrinsics::{add_with_overflow, wrapping_add};
-use std::time::Instant;
-use tracing::{debug, info, warn};
+use core::intrinsics::{add_with_overflow, wrapping_add};
+use log::{debug, info, warn};
 use crate::gametank_bus::{CpuBus};
 
 #[derive(Debug)]

@@ -1,4 +1,4 @@
-use tracing::{debug, warn};
+use log::{debug, warn};
 use crate::inputs::GamePad;
 use crate::gametank_bus::reg_etc::{BankingRegister, BlitterFlags, GraphicsMemoryMap};
 
