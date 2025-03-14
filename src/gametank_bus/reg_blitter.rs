@@ -7,7 +7,8 @@ pub struct BlitStart {
     pub addressed: bool,
 }
 
-impl BlitStart { 
+impl BlitStart {
+    #[inline(always)]
     pub fn read_once(&mut self) -> (bool, bool) {
         let (data, addressed)  = (self.write & 1 == 1, self.addressed);
         self.write = 0;
@@ -29,6 +30,7 @@ pub struct BlitterRegisters {
 }
 
 impl BlitterRegisters {
+    #[inline(always)]
     pub fn vram_quadrant(&self) -> usize {
         let mut quadrant = 0;
 
@@ -43,6 +45,7 @@ impl BlitterRegisters {
         quadrant
     }
 
+    #[inline(always)]
     pub fn read_byte(&mut self, address: u16) -> u8 {
         match address {
             0x4006 => { self.start.addressed = true; }
@@ -52,6 +55,7 @@ impl BlitterRegisters {
         0
     }
 
+    #[inline(always)]
     pub fn write_byte(&mut self, address: u16, data: u8) {
         match address {
             0x4000 => { self.vx = data }

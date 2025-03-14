@@ -4,7 +4,7 @@ use bitfield::bitfield;
 bitfield!{
     pub struct BankingRegister(u8);
     impl Debug;
-    pub vram_page, set_ram_page: 2, 0;
+    pub vram_page, set_vram_page: 2, 0;
     pub framebuffer, set_framebuffer: 3;
     pub clip_blits_h, set_clip_blits_h: 4;
     pub clip_blits_v, set_clip_blits_v: 5;

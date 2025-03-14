@@ -176,7 +176,7 @@ impl Blitter {
 
         // write to active framebuffer, if not transparent
         if bus.system_control.dma_flags.dma_opaque() || color != 0 {
-            bus.framebuffers[out_fb].borrow_mut()[out_x + out_y*128] = color;
+            unsafe { bus.framebuffers[out_fb].borrow_mut()[out_x + out_y*128] = color; }
         }
 
         // increment x offset
