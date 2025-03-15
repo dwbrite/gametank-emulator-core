@@ -225,11 +225,29 @@ pub enum State {
 pub struct W65C02S {
     state: State,
     pc: u16,
-    cycles: i32,
     a: u8, x: u8, y: u8, s: u8, p: u8,
     irq: bool, irq_pending: bool,
     nmi: bool, nmi_edge: bool, nmi_pending: bool,
 }
+
+pub static OPCODE_CYCLES: [i32; 256]= [
+    7, 6, 2, 0, 5, 3, 5, 5, 2, 3, 4, 0, 7, 5, 7, 7,
+    3, 5, 5, 0, 5, 4, 6, 5, 1, 5, 4, 0, 7, 5, 7, 7,
+    6, 6, 2, 0, 3, 3, 5, 5, 3, 3, 4, 0, 5, 5, 7, 7,
+    2, 5, 5, 0, 4, 4, 6, 5, 1, 5, 4, 0, 5, 5, 7, 7,
+    5, 6, 2, 0, 2, 3, 5, 5, 2, 3, 4, 0, 4, 5, 7, 7,
+    3, 5, 5, 0, 3, 4, 6, 5, 1, 5, 2, 0, 9, 5, 7, 7,
+    5, 6, 2, 0, 3, 3, 5, 5, 3, 3, 4, 0, 7, 5, 7, 7,
+    2, 5, 5, 0, 4, 4, 6, 5, 1, 5, 2, 0, 7, 5, 7, 7,
+    3, 5, 2, 0, 3, 2, 3, 5, 4, 3, 1, 0, 5, 5, 5, 6,
+    3, 5, 4, 0, 4, 3, 4, 5, 1, 5, 1, 0, 5, 5, 6, 6,
+    3, 6, 3, 0, 3, 3, 3, 5, 1, 2, 1, 0, 5, 5, 5, 6,
+    2, 5, 5, 0, 4, 4, 4, 5, 1, 5, 1, 0, 5, 5, 5, 6,
+    3, 6, 2, 0, 3, 3, 5, 5, 4, 3, 4, 0, 5, 5, 7, 6,
+    3, 5, 5, 0, 3, 4, 6, 5, 1, 5, 2, 1, 4, 5, 8, 6,
+    3, 6, 2, 0, 3, 3, 5, 5, 4, 3, 1, 0, 5, 5, 7, 6,
+    2, 5, 5, 0, 3, 4, 6, 5, 1, 6, 3, 0, 4, 6, 8, 6,
+];
 
 impl W65C02S {
     /// Creates a new `W65C02S` instance, initialized in a newly-reset state.
@@ -238,8 +256,6 @@ impl W65C02S {
     pub fn new() -> W65C02S {
         W65C02S {
             state: State::HasBeenReset,
-            cycles: 0,
-
             pc: 0xFFFF,
             a: 0xFF,
             x: 0xFF,
@@ -374,23 +390,350 @@ impl W65C02S {
         if c { self.p |= P_C; }
         else { self.p &= !P_C; }
     }
+
+    fn run_instruction<S: System>(cpu: &mut W65C02S, system: &mut S, opcode: u8) {
+        let DISPATCH: [fn(&mut W65C02S, &mut S); 256] = [
+            W65C02S::brk,
+            W65C02S::ora::<_, ZeroPageXIndirect, S>,
+            W65C02S::nop::<_, Immediate, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::tsb::<_, ZeroPage, S>,
+            W65C02S::ora::<_, ZeroPage, S>,
+            W65C02S::asl::<_, ZeroPage, S>,
+
+            W65C02S::rmb_op_07::<S>,
+
+            W65C02S::php,
+            W65C02S::ora::<_, Immediate, S>,
+            W65C02S::asl::<_, ImpliedA, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::tsb::<_, Absolute, S>,
+            W65C02S::ora::<_, Absolute, S>,
+            W65C02S::asl::<_, Absolute, S>,
+
+            W65C02S::bbr_op_0f::<S>,
+            W65C02S::branch_n0::<S>,
+
+            W65C02S::ora::<_, ZeroPageIndirectY, S>,
+            W65C02S::ora::<_, ZeroPageIndirect, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::trb::<_, ZeroPage, S>,
+            W65C02S::ora::<_, ZeroPageX, S>,
+            W65C02S::asl::<_, ZeroPageX, S>,
+
+            W65C02S::rmb_op_17::<S>,
+
+            W65C02S::clc,
+            W65C02S::ora::<_, AbsoluteY, S>,
+            W65C02S::inc::<_, ImpliedA, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::trb::<_, Absolute, S>,
+            W65C02S::ora::<_, AbsoluteX, S>,
+            W65C02S::asl::<_, AbsoluteX, S>,
+
+            W65C02S::bbr_op_1f::<S>,
+
+            W65C02S::jsr,
+            W65C02S::and::<_, ZeroPageXIndirect, S>,
+            W65C02S::nop::<_, Immediate, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::bit::<_, ZeroPage, S>,
+            W65C02S::and::<_, ZeroPage, S>,
+            W65C02S::rol::<_, ZeroPage, S>,
+
+            W65C02S::rmb_op_27::<S>,
+
+            W65C02S::plp,
+            W65C02S::and::<_, Immediate, S>,
+            W65C02S::rol::<_, ImpliedA, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::bit::<_, Absolute, S>,
+            W65C02S::and::<_, Absolute, S>,
+            W65C02S::rol::<_, Absolute, S>,
+
+            W65C02S::bbr_op_2f::<S>,
+            W65C02S::branch_n1::<S>,
+
+            W65C02S::and::<_, ZeroPageIndirectY, S>,
+            W65C02S::and::<_, ZeroPageIndirect, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::bit::<_, ZeroPageX, S>,
+            W65C02S::and::<_, ZeroPageX, S>,
+            W65C02S::rol::<_, ZeroPageX, S>,
+
+            W65C02S::rmb_op_37::<S>,
+
+            W65C02S::sec,
+            W65C02S::and::<_, AbsoluteY, S>,
+            W65C02S::dec::<_, ImpliedA, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::bit::<_, AbsoluteX, S>,
+            W65C02S::and::<_, AbsoluteX, S>,
+            W65C02S::rol::<_, AbsoluteX, S>,
+
+            W65C02S::bbr_op_3f::<S>,
+
+            W65C02S::rti,
+            W65C02S::eor::<_, ZeroPageXIndirect, S>,
+            W65C02S::nop::<_, Immediate, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::nop::<_, ZeroPage, S>,
+            W65C02S::eor::<_, ZeroPage, S>,
+            W65C02S::lsr::<_, ZeroPage, S>,
+
+            W65C02S::rmb_op_47::<S>,
+
+            W65C02S::pha,
+            W65C02S::eor::<_, Immediate, S>,
+            W65C02S::lsr::<_, ImpliedA, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::jmp::<_, Absolute, S>,
+            W65C02S::eor::<_, Absolute, S>,
+            W65C02S::lsr::<_, Absolute, S>,
+
+            W65C02S::bbr_op_4f::<S>,
+            W65C02S::branch_v0::<S>,
+
+            W65C02S::eor::<_, ZeroPageIndirectY, S>,
+            W65C02S::eor::<_, ZeroPageIndirect, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::nop::<_, ZeroPageX, S>,
+            W65C02S::eor::<_, ZeroPageX, S>,
+            W65C02S::lsr::<_, ZeroPageX, S>,
+
+            W65C02S::rmb_op_57::<S>,
+
+            W65C02S::cli,
+            W65C02S::eor::<_, AbsoluteY, S>,
+            W65C02S::phy,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::nop_5c::<_, Absolute, S>,
+            W65C02S::eor::<_, AbsoluteX, S>,
+            W65C02S::lsr::<_, AbsoluteX, S>,
+
+            W65C02S::bbr_op_5f::<S>,
+
+            W65C02S::rts,
+            W65C02S::adc::<_, ZeroPageXIndirect, S>,
+            W65C02S::nop::<_, Immediate, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::stz::<_, ZeroPage, S>,
+            W65C02S::adc::<_, ZeroPage, S>,
+            W65C02S::ror::<_, ZeroPage, S>,
+
+            W65C02S::rmb_op_67::<S>,
+
+            W65C02S::pla,
+            W65C02S::adc::<_, Immediate, S>,
+            W65C02S::ror::<_, ImpliedA, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::jmp::<_, AbsoluteIndirect, S>,
+            W65C02S::adc::<_, Absolute, S>,
+            W65C02S::ror::<_, Absolute, S>,
+
+            W65C02S::bbr_op_6f::<S>,
+            W65C02S::branch_v1::<S>,
+
+            W65C02S::adc::<_, ZeroPageIndirectY, S>,
+            W65C02S::adc::<_, ZeroPageIndirect, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::stz::<_, ZeroPageX, S>,
+            W65C02S::adc::<_, ZeroPageX, S>,
+            W65C02S::ror::<_, ZeroPageX, S>,
+
+            W65C02S::rmb_op_77::<S>,
+
+            W65C02S::sei,
+            W65C02S::adc::<_, AbsoluteY, S>,
+            W65C02S::ply,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::jmp::<_, AbsoluteXIndirect, S>,
+            W65C02S::adc::<_, AbsoluteX, S>,
+            W65C02S::ror::<_, AbsoluteX, S>,
+
+            W65C02S::bbr_op_7f::<S>,
+            W65C02S::branch_uncond::<S>,
+
+            W65C02S::sta::<_, ZeroPageXIndirect, S>,
+            W65C02S::nop::<_, Immediate, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::sty::<_, ZeroPage, S>,
+            W65C02S::sta_zp::<S>,
+            W65C02S::stx::<_, ZeroPage, S>,
+
+            W65C02S::smb_op_87::<S>,
+
+            W65C02S::dec::<_, ImpliedY, S>,
+            W65C02S::bit_i::<_, Immediate, S>,
+            W65C02S::txa,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::sty::<_, Absolute, S>,
+            W65C02S::sta_abs::<S>,
+            W65C02S::stx::<_, Absolute, S>,
+
+            W65C02S::bbs_op_8f::<S>,
+            W65C02S::branch_c0::<S>,
+
+            W65C02S::sta_indirect_y::<S>,
+            W65C02S::sta::<_, ZeroPageIndirect, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::sty::<_, ZeroPageX, S>,
+            W65C02S::sta::<_, ZeroPageX, S>,
+            W65C02S::stx::<_, ZeroPageY, S>,
+
+            W65C02S::smb_op_97::<S>,
+
+            W65C02S::tya,
+            W65C02S::sta::<_, AbsoluteYSlower, S>,
+            W65C02S::txs,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::stz::<_, Absolute, S>,
+            W65C02S::sta_absx::<S>,
+            W65C02S::stz::<_, AbsoluteXSlower, S>,
+
+            W65C02S::bbs_op_9f::<S>,
+
+            W65C02S::ldy::<_, Immediate, S>,
+            W65C02S::lda::<_, ZeroPageXIndirect, S>,
+            W65C02S::ldx::<_, Immediate, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::ldy::<_, ZeroPage, S>,
+            W65C02S::lda::<_, ZeroPage, S>,
+            W65C02S::ldx::<_, ZeroPage, S>,
+
+            W65C02S::smb_op_a7::<S>,
+
+            W65C02S::tay,
+            W65C02S::lda_imm::<S>,
+            W65C02S::tax,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::ldy::<_, Absolute, S>,
+            W65C02S::lda::<_, Absolute, S>,
+            W65C02S::ldx::<_, Absolute, S>,
+
+            W65C02S::bbs_op_af::<S>,
+            W65C02S::branch_c1::<S>,
+
+            W65C02S::lda::<_, ZeroPageIndirectY, S>,
+            W65C02S::lda::<_, ZeroPageIndirect, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::ldy::<_, ZeroPageX, S>,
+            W65C02S::lda::<_, ZeroPageX, S>,
+            W65C02S::ldx::<_, ZeroPageY, S>,
+
+            W65C02S::smb_op_b7::<S>,
+
+            W65C02S::clv,
+            W65C02S::lda::<_, AbsoluteY, S>,
+            W65C02S::tsx,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::ldy::<_, AbsoluteX, S>,
+            W65C02S::lda::<_, AbsoluteX, S>,
+            W65C02S::ldx::<_, AbsoluteY, S>,
+
+            W65C02S::bbs_op_bf::<S>,
+
+            W65C02S::cpy::<_, Immediate, S>,
+            W65C02S::cmp::<_, ZeroPageXIndirect, S>,
+            W65C02S::nop::<_, Immediate, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::cpy::<_, ZeroPage, S>,
+            W65C02S::cmp::<_, ZeroPage, S>,
+            W65C02S::dec::<_, ZeroPage, S>,
+
+            W65C02S::smb_op_c7::<S>,
+
+            W65C02S::inc::<_, ImpliedY, S>,
+            W65C02S::cmp::<_, Immediate, S>,
+            W65C02S::dec::<_, ImpliedX, S>,
+            W65C02S::wai,
+            W65C02S::cpy::<_, Absolute, S>,
+            W65C02S::cmp::<_, Absolute, S>,
+            W65C02S::dec::<_, Absolute, S>,
+
+            W65C02S::bbs_op_cf::<S>,
+            W65C02S::branch_z0::<S>,
+
+            W65C02S::cmp::<_, ZeroPageIndirectY, S>,
+            W65C02S::cmp::<_, ZeroPageIndirect, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::nop::<_, ZeroPageX, S>,
+            W65C02S::cmp::<_, ZeroPageX, S>,
+            W65C02S::dec::<_, ZeroPageX, S>,
+
+            W65C02S::smb_op_d7::<S>,
+
+            W65C02S::cld,
+            W65C02S::cmp::<_, AbsoluteY, S>,
+            W65C02S::phx,
+            W65C02S::stp,
+            W65C02S::nop::<_, Absolute, S>,
+            W65C02S::cmp::<_, AbsoluteX, S>,
+            W65C02S::dec::<_, AbsoluteXSlower, S>,
+
+            W65C02S::bbs_op_df::<S>,
+
+            W65C02S::cpx::<_, Immediate, S>,
+            W65C02S::sbc::<_, ZeroPageXIndirect, S>,
+            W65C02S::nop::<_, Immediate, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::cpx::<_, ZeroPage, S>,
+            W65C02S::sbc::<_, ZeroPage, S>,
+            W65C02S::inc::<_, ZeroPage, S>,
+
+            W65C02S::smb_op_e7::<S>,
+
+            W65C02S::inc::<_, ImpliedX, S>,
+            W65C02S::sbc::<_, Immediate, S>,
+            W65C02S::nop::<_, Implied, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::cpx::<_, Absolute, S>,
+            W65C02S::sbc::<_, Absolute, S>,
+            W65C02S::inc::<_, Absolute, S>,
+
+            W65C02S::bbs_op_ef::<S>,
+            W65C02S::branch_z1::<S>,
+
+            W65C02S::sbc::<_, ZeroPageIndirectY, S>,
+            W65C02S::sbc::<_, ZeroPageIndirect, S>,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::nop::<_, ZeroPageX, S>,
+            W65C02S::sbc::<_, ZeroPageX, S>,
+            W65C02S::inc::<_, ZeroPageX, S>,
+
+            W65C02S::smb_op_f7::<S>,
+
+            W65C02S::sed,
+            W65C02S::sbc::<_, AbsoluteY, S>,
+            W65C02S::plx,
+            W65C02S::nop::<_, FastImplied, S>,
+            W65C02S::nop::<_, Absolute, S>,
+            W65C02S::sbc::<_, AbsoluteX, S>,
+            W65C02S::inc::<_, AbsoluteXSlower, S>,
+
+            W65C02S::bbs_op_ff::<S>,
+        ];
+
+        let f = DISPATCH[opcode as usize];
+        f(cpu, system);
+    }
+
+
     /// Step the processor once. This means executing an interrupt sequence,
     /// fetching an instruction, or doing a spurious read, depending on the
     /// current state of the processor. Returns the new state.
     ///
     /// Always executes at least one bus cycle. May execute more.
     pub fn step<S: System>(&mut self, system: &mut S) -> i32 {
-        self.cycles = 0;
-
         match self.state {
-            State::Stopped => self.cycles = 1,
+            State::Stopped => 1,
             State::AwaitingInterrupt => {
                 if self.irq || self.nmi_edge {
                     self.state = State::Running;
                 }
                 self.check_irq_edge();
 
-                self.cycles = 2;
+                2
             },
             State::HasBeenReset => {
                 // clear the D flag, set the I flag
@@ -401,7 +744,8 @@ impl W65C02S {
                 self.pc = (self.pc & 0x00FF) | (system.read_vector(self, RESET_VECTOR+1) as u16) << 8;
                 // we are ready to be actually running!
                 self.state = State::Running;
-                self.cycles = 5
+
+                5
             },
             State::Running => {
                 if self.nmi_pending {
@@ -416,7 +760,7 @@ impl W65C02S {
                     self.pc = (self.pc & 0xFF00) | (system.read_vector(self, NMI_VECTOR) as u16);
                     self.pc = (self.pc & 0x00FF) | (system.read_vector(self, NMI_VECTOR+1) as u16) << 8;
 
-                    self.cycles = 5;
+                    5
                 }
                 else if self.irq_pending {
                     self.irq_pending = false;
@@ -429,12 +773,15 @@ impl W65C02S {
                     self.pc = (self.pc & 0xFF00) | (system.read_vector(self, IRQ_VECTOR) as u16);
                     self.pc = (self.pc & 0x00FF) | (system.read_vector(self, IRQ_VECTOR+1) as u16) << 8;
 
-                    self.cycles = 5;
+                    5
                 }
                 else {
                     // oh boy, we're running! oh boy oh boy!
                     let opcode_addr = self.read_pc_postincrement();
                     let opcode = system.read_opcode(self, opcode_addr);
+
+                    // Self::run_instruction(self, system, opcode);
+
                     // oh boy OH JEEZ
                     match opcode {
                         0x00 => self.brk(system),
@@ -694,10 +1041,11 @@ impl W65C02S {
                         0xFE => self.inc::<_, AbsoluteXSlower, S>(system),
                         0xFF => self.bbs::<_, RelativeBitBranch, S>(system, 0x80),
                     }
+
+                    return unsafe { *OPCODE_CYCLES.get_unchecked(opcode as usize) } ;
                 }
             },
         }
-        self.cycles
     }
 }
 

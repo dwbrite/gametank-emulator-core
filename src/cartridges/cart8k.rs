@@ -35,6 +35,6 @@ impl Cartridge for Cartridge8K {
 
     #[inline(always)]
     fn read_byte(&self, address: u16) -> u8 {
-        self.data[(address - 0x6000) as usize]
+        unsafe { *self.data.get_unchecked((address - 0x6000) as usize) }
     }
 }

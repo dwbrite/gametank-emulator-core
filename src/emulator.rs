@@ -1,6 +1,7 @@
 use alloc::boxed::Box;
+use alloc::vec;
 use alloc::vec::Vec;
-use w65c02s::W65C02S;
+use w65c02s::{System, W65C02S};
 // use core::collections::HashMap;
 use log::{debug, error, info, warn};
 use w65c02s::State::AwaitingInterrupt;
@@ -89,7 +90,21 @@ impl <Clock: TimeDaemon> Debug for Emulator<Clock> {
             .field("last_emu_tick", &self.last_emu_tick);
 
         Ok(())
-    }}
+    }
+}
+
+struct PseudoSystem;
+
+impl System for PseudoSystem {
+    fn read(&mut self, cpu: &mut W65C02S, addr: u16) -> u8 {
+        0
+    }
+
+    fn write(&mut self, cpu: &mut W65C02S, addr: u16, data: u8) {
+        // nop
+    }
+}
+
 
 impl <Clock: TimeDaemon> Emulator<Clock> {
     pub fn wasm_init(&mut self) {
@@ -134,7 +149,6 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
             cpu_frequency_hz,
             cpu_ns_per_cycle,
             last_render_time,
-
 
             audio_producer,
             audio_sample_rate: 0.0,
