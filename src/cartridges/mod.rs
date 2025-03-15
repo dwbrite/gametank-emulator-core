@@ -36,6 +36,7 @@ impl CartridgeType {
         }
     }
 
+    #[inline(always)]
     pub fn read_byte(&self, address: u16) -> u8 {
         match self {
             CartridgeType::Cart8k(c) => {c.read_byte(address)}

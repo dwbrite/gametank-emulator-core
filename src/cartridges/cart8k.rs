@@ -10,12 +10,15 @@ pub struct Cartridge8K {
 impl Deref for Cartridge8K {
     type Target = [u8; 0x2000];
 
+    #[inline(always)]
     fn deref(&self) -> &Self::Target {
         &self.data
     }
 }
 
 impl DerefMut for Cartridge8K {
+
+    #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.data
     }
@@ -30,6 +33,7 @@ impl Cartridge for Cartridge8K {
         }
     }
 
+    #[inline(always)]
     fn read_byte(&self, address: u16) -> u8 {
         self.data[(address - 0x6000) as usize]
     }

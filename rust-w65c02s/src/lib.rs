@@ -1,3 +1,4 @@
+#![feature(inherent_associated_types)]
 #![no_std]
 
 //! This crate is a cycle-accurate simulator for the WDC W65C02S, the most
@@ -142,12 +143,6 @@ pub trait System {
     /// instruction. SYNC and MLB are LOW, VPB is HIGH.
     #[inline(always)]
     fn read_locked(&mut self, cpu: &mut W65C02S, addr: u16) -> u8 { self.read(cpu, addr) }
-    /// Second data read from the given address as part of a Read-Modify-Write
-    /// instruction. This data is ignored; this is an "idle cycle". SYNC and
-    /// MLB are LOW, VPB is HIGH. Indistinguishable from a locked data read on
-    /// real hardware, but the distinction may be useful for simulation.
-    #[inline(always)]
-    fn read_locked_spurious(&mut self, cpu: &mut W65C02S, addr: u16) { self.read_locked(cpu, addr); }
     /// Read part of an interrupt vector from the given address. VPB is LOW,
     /// and SYNC and MLB are HIGH.
     #[inline(always)]
@@ -164,25 +159,11 @@ pub trait System {
     /// Modify-Write instruction. SYNC and MLB are LOW, VPB is HIGH.
     #[inline(always)]
     fn write_locked(&mut self, cpu: &mut W65C02S, addr: u16, data: u8) { self.write(cpu, addr, data) }
-    /// Read an instruction opcode whose execution will be preempted by an
-    /// interrupt or a reset, or which follows a WAI or STP instruction that
-    /// has not yet been broken out of. VPB, MLB, and SYNC are all HIGH.
-    /// Indistinguishable from a normal opcode fetch on real hardware, but
-    /// the distinction may be useful for simulation.
-    #[inline(always)]
-    fn read_opcode_spurious(&mut self, cpu: &mut W65C02S, addr: u16) { self.read_opcode(cpu, addr); }
     /// Read an instruction operand from the given address. SYNC is LOW and VPB
     /// and MLB are HIGH. Indistinguishable from an ordinary data read on real
     /// hardware, but the distinction may be useful for simulation.
     #[inline(always)]
     fn read_operand(&mut self, cpu: &mut W65C02S, addr: u16) -> u8 { self.read(cpu, addr) }
-    /// Read an instruction operand from the given address, except that the
-    /// instruction had an implied operand or was preempted by a reset. SYNC
-    /// is LOW and VPB and MLB are HIGH. Indistinguishable from an ordinary
-    /// data read on real hardware, but the distinction may be useful for
-    /// simulation.
-    #[inline(always)]
-    fn read_operand_spurious(&mut self, cpu: &mut W65C02S, addr: u16) { self.read(cpu, addr); }
     /// Read part of a pointer from the given address. SYNC is LOW and VPB and
     /// MLB are HIGH. Indistinguishable from an ordinary data read on real
     /// hardware, but the distinction may be useful for simulation.
@@ -193,17 +174,6 @@ pub trait System {
     /// hardware, but the distinction may be useful for simulation.
     #[inline(always)]
     fn read_stack(&mut self, cpu: &mut W65C02S, addr: u16) -> u8 { self.read(cpu, addr) }
-    /// Spurious stack "read" that occurs during reset. SYNC is LOW and VPB
-    /// and MLB are HIGH. Indistinguishable from an ordinary data read on real
-    /// hardware, but the distinction may be useful for simulation.
-    #[inline(always)]
-    fn read_stack_spurious(&mut self, cpu: &mut W65C02S, addr: u16) { self.read_stack(cpu, addr); }
-    /// Read a byte of data from the given address during an "internal
-    /// operation" cycle. SYNC is LOW and VPB and MLB are HIGH.
-    /// Indistinguishable from an ordinary data read on real hardware, but the
-    /// distinction may be useful for simulation.
-    #[inline(always)]
-    fn read_spurious(&mut self, cpu: &mut W65C02S, addr: u16) { self.read(cpu, addr); }
 }
 
 /// Status register flag corresponding to the **C**arry bit.
@@ -251,8 +221,11 @@ pub enum State {
 /// An instance of a W65C02S, encapsulating the entire runtime state of the
 /// processor itself. Not very useful without a `System` to go with it.
 #[derive(Copy,Clone,Debug,PartialEq,Eq)]
+#[repr(C, packed)]
 pub struct W65C02S {
-    state: State, pc: u16,
+    state: State,
+    pc: u16,
+    cycles: i32,
     a: u8, x: u8, y: u8, s: u8, p: u8,
     irq: bool, irq_pending: bool,
     nmi: bool, nmi_edge: bool, nmi_pending: bool,
@@ -265,6 +238,8 @@ impl W65C02S {
     pub fn new() -> W65C02S {
         W65C02S {
             state: State::HasBeenReset,
+            cycles: 0,
+
             pc: 0xFFFF,
             a: 0xFF,
             x: 0xFF,
@@ -345,27 +320,15 @@ impl W65C02S {
     pub fn get_state(&self) -> State { self.state }
     /// Push a value onto the stack using the given `System`.
     #[inline(always)]
-    pub fn push<S: System>(&mut self, system: &mut S, value: u8) {
+    pub fn push(&mut self, system: &mut dyn System, value: u8) {
         system.write_stack(self, 0x100 | self.s as u16, value);
-        self.s = self.s.wrapping_sub(1);
-    }
-    /// Spurious push during reset.
-    #[inline(always)]
-    pub fn spurious_push<S: System>(&mut self, system: &mut S) {
-        system.read_stack_spurious(self, 0x100 | self.s as u16);
         self.s = self.s.wrapping_sub(1);
     }
     /// Pop a value from the stack using the given `System`.
     #[inline(always)]
-    pub fn pop<S: System>(&mut self, system: &mut S) -> u8 {
+    pub fn pop(&mut self, system: &mut dyn System) -> u8 {
         self.s = self.s.wrapping_add(1);
         system.read_stack(self, 0x100 | self.s as u16)
-    }
-    /// Spuriously read a value from the next stack slot, like happens during
-    /// a JSR or RTS or most pulls.
-    #[inline(always)]
-    pub fn spurious_stack_read<S: System>(&mut self, system: &mut S) {
-        system.read_spurious(self, 0x100 | (self.s as u16));
     }
     /// Change the input on the `IRQB` pin. `false` means no interrupt pending.
     /// `true` means some interrupt is pending. Note that `IRQB` is an active-
@@ -416,26 +379,20 @@ impl W65C02S {
     /// current state of the processor. Returns the new state.
     ///
     /// Always executes at least one bus cycle. May execute more.
-    pub fn step<S: System>(&mut self, system: &mut S) -> State {
+    pub fn step<S: System>(&mut self, system: &mut S) -> i32 {
+        self.cycles = 0;
+
         match self.state {
-            State::Stopped => system.read_operand_spurious(self, self.pc),
+            State::Stopped => self.cycles = 1,
             State::AwaitingInterrupt => {
                 if self.irq || self.nmi_edge {
                     self.state = State::Running;
-                    system.read_operand_spurious(self, self.pc);
                 }
                 self.check_irq_edge();
-                system.read_operand_spurious(self, self.pc);
+
+                self.cycles = 2;
             },
             State::HasBeenReset => {
-                // first, we spuriously read an opcode
-                system.read_opcode_spurious(self, self.pc);
-                // second, we read ... the same byte, but with SYNC low
-                system.read_operand_spurious(self, self.pc);
-                // three spurious pushes...
-                self.spurious_push(system);
-                self.spurious_push(system);
-                self.spurious_push(system);
                 // clear the D flag, set the I flag
                 self.p &= !P_D;
                 self.p |= P_I;
@@ -444,14 +401,13 @@ impl W65C02S {
                 self.pc = (self.pc & 0x00FF) | (system.read_vector(self, RESET_VECTOR+1) as u16) << 8;
                 // we are ready to be actually running!
                 self.state = State::Running;
+                self.cycles = 5
             },
             State::Running => {
                 if self.nmi_pending {
                     self.nmi_pending = false;
                     self.nmi_edge = false;
                     let opcode_addr = self.get_pc();
-                    system.read_opcode_spurious(self, opcode_addr);
-                    system.read_spurious(self, opcode_addr);
                     self.push(system, (opcode_addr >> 8) as u8);
                     self.push(system, opcode_addr as u8);
                     self.push(system, self.p & !P_B);
@@ -459,12 +415,12 @@ impl W65C02S {
                     self.p |= P_I;
                     self.pc = (self.pc & 0xFF00) | (system.read_vector(self, NMI_VECTOR) as u16);
                     self.pc = (self.pc & 0x00FF) | (system.read_vector(self, NMI_VECTOR+1) as u16) << 8;
+
+                    self.cycles = 5;
                 }
                 else if self.irq_pending {
                     self.irq_pending = false;
                     let opcode_addr = self.get_pc();
-                    system.read_opcode_spurious(self, opcode_addr);
-                    system.read_spurious(self, opcode_addr);
                     self.push(system, (opcode_addr >> 8) as u8);
                     self.push(system, opcode_addr as u8);
                     self.push(system, self.p);
@@ -472,6 +428,8 @@ impl W65C02S {
                     self.p |= P_I;
                     self.pc = (self.pc & 0xFF00) | (system.read_vector(self, IRQ_VECTOR) as u16);
                     self.pc = (self.pc & 0x00FF) | (system.read_vector(self, IRQ_VECTOR+1) as u16) << 8;
+
+                    self.cycles = 5;
                 }
                 else {
                     // oh boy, we're running! oh boy oh boy!
@@ -612,7 +570,7 @@ impl W65C02S {
                         0x82 => self.nop::<_, Immediate, S>(system),
                         0x83 => self.nop::<_, FastImplied, S>(system),
                         0x84 => self.sty::<_, ZeroPage, S>(system),
-                        0x85 => self.sta::<_, ZeroPage, S>(system),
+                        0x85 => self.sta_zp::<S>(system),
                         0x86 => self.stx::<_, ZeroPage, S>(system),
                         0x87 => self.smb::<_, ZeroPage, S>(system, 0x01),
                         0x88 => self.dec::<_, ImpliedY, S>(system),
@@ -620,11 +578,11 @@ impl W65C02S {
                         0x8A => self.txa(system),
                         0x8B => self.nop::<_, FastImplied, S>(system),
                         0x8C => self.sty::<_, Absolute, S>(system),
-                        0x8D => self.sta::<_, Absolute, S>(system),
+                        0x8D => self.sta_abs::<S>(system),
                         0x8E => self.stx::<_, Absolute, S>(system),
                         0x8F => self.bbs::<_, RelativeBitBranch, S>(system, 0x01),
                         0x90 => self.branch::<_, Relative, S>(system, self.p & P_C == 0),
-                        0x91 => self.sta::<_, ZeroPageIndirectYSlower, S>(system),
+                        0x91 => self.sta_indirect_y::<S>(system),
                         0x92 => self.sta::<_, ZeroPageIndirect, S>(system),
                         0x93 => self.nop::<_, FastImplied, S>(system),
                         0x94 => self.sty::<_, ZeroPageX, S>(system),
@@ -636,7 +594,7 @@ impl W65C02S {
                         0x9A => self.txs(system),
                         0x9B => self.nop::<_, FastImplied, S>(system),
                         0x9C => self.stz::<_, Absolute, S>(system),
-                        0x9D => self.sta::<_, AbsoluteXSlower, S>(system),
+                        0x9D => self.sta_absx::<S>(system),
                         0x9E => self.stz::<_, AbsoluteXSlower, S>(system),
                         0x9F => self.bbs::<_, RelativeBitBranch, S>(system, 0x02),
                         0xA0 => self.ldy::<_, Immediate, S>(system),
@@ -648,7 +606,7 @@ impl W65C02S {
                         0xA6 => self.ldx::<_, ZeroPage, S>(system),
                         0xA7 => self.smb::<_, ZeroPage, S>(system, 0x04),
                         0xA8 => self.tay(system),
-                        0xA9 => self.lda::<_, Immediate, S>(system),
+                        0xA9 => self.lda_imm::<S>(system),
                         0xAA => self.tax(system),
                         0xAB => self.nop::<_, FastImplied, S>(system),
                         0xAC => self.ldy::<_, Absolute, S>(system),
@@ -739,7 +697,7 @@ impl W65C02S {
                 }
             },
         }
-        self.state
+        self.cycles
     }
 }
 

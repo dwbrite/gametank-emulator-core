@@ -1,3 +1,4 @@
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use w65c02s::W65C02S;
 // use core::collections::HashMap;
@@ -118,7 +119,7 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
         let cpu_frequency_hz = 3_579_545.0; // Precise frequency
         let cpu_ns_per_cycle = 1_000_000_000.0 / cpu_frequency_hz; // Nanoseconds per cycle
 
-        let last_render_time = clock.get_now_ms();
+        let last_render_time = last_cpu_tick_ms;
 
         Emulator {
             play_state,
@@ -173,16 +174,15 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
                 self.wait_counter = 0;
             }
 
-            let _ = self.cpu.step(&mut self.cpu_bus);
+            let cpu_cycles = self.cpu.step(&mut self.cpu_bus);
 
-            let cpu_cycles = self.cpu_bus.clear_cycles() as i32;
             remaining_cycles -= cpu_cycles;
 
             acp_cycle_accumulator += cpu_cycles * 4;
 
             // pass aram to acp
             if self.cpu_bus.system_control.acp_enabled() {
-                // self.run_acp(&mut acp_cycle_accumulator);
+                self.run_acp(&mut acp_cycle_accumulator);
             }
 
             // blit
@@ -212,7 +212,7 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
     }
 
     fn run_acp(&mut self, acp_cycle_accumulator: &mut i32) {
-        self.acp_bus.aram = self.cpu_bus.aram.take();
+        // self.acp_bus.aram = self.cpu_bus.aram.take();
 
         if self.cpu_bus.system_control.clear_acp_reset() {
             self.acp.reset();
@@ -223,8 +223,9 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
         }
 
         while *acp_cycle_accumulator > 0 {
-            let _ = self.acp.step(&mut self.acp_bus);
-            *acp_cycle_accumulator -= self.acp_bus.clear_cycles() as i32;
+            let acp_cycles = self.acp.step(&mut self.acp_bus);
+            *acp_cycle_accumulator -= acp_cycles;
+            self.acp_bus.irq_counter -= acp_cycles;
 
             // clear stuff ig
             self.acp.set_irq(false);
@@ -241,7 +242,7 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
                 }
             }
         }
-        self.cpu_bus.aram = self.acp_bus.aram.take();
+        // self.cpu_bus.aram = self.acp_bus.aram.take();
     }
 
     fn vblank(&mut self) {

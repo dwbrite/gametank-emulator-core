@@ -41,10 +41,12 @@ pub struct SystemControl {
 }
 
 impl SystemControl {
+    #[inline(always)]
     pub fn get_ram_bank(&self) -> usize {
         self.banking_register.ram_bank() as usize
     }
 
+    #[inline(always)]
     pub fn get_graphics_memory_map(&self) -> GraphicsMemoryMap {
         if self.dma_flags.dma_enable() { // 1 is blitter enabled
             return GraphicsMemoryMap::BlitterRegisters
@@ -57,29 +59,35 @@ impl SystemControl {
         return GraphicsMemoryMap::VRAM
     }
 
+    #[inline(always)]
     pub fn acp_enabled(&self) -> bool {
         (self.audio_enable_sample_rate & 0b1000_0000) != 0
     }
+    #[inline(always)]
     pub fn clear_acp_reset(&mut self) -> bool {
         let reset = self.reset_acp & 0b0000_0001;
         self.reset_acp = 0;
         reset == 1
     }
 
+    #[inline(always)]
     pub fn clear_acp_nmi(&mut self) -> bool {
         let nmi = self.nmi_acp & 0b0000_0001;
         self.nmi_acp = 0;
         nmi == 1
     }
 
+    #[inline(always)]
     pub fn sample_rate(&self) -> u8 {
         self.audio_enable_sample_rate
     }
 
+    #[inline(always)]
     pub fn get_framebuffer_out(&self) -> usize {
         self.dma_flags.dma_page_out() as usize
     }
 
+    #[inline(always)]
     pub fn write_byte(&mut self, address: u16, data: u8) {
         match address {
             0x2000 => { self.reset_acp = data }
@@ -96,6 +104,7 @@ impl SystemControl {
         }
     }
 
+    #[inline(always)]
     pub fn read_byte(&mut self, address: u16) -> u8 {
 
         match address {
@@ -112,6 +121,7 @@ impl SystemControl {
         }
     }
 
+    #[inline(always)]
     pub fn peek_byte(&self, address: u16) -> u8 {
         match address {
             0x2008 => {
@@ -126,6 +136,7 @@ impl SystemControl {
         }
     }
 
+    #[inline(always)]
     pub fn read_gamepad_byte(&mut self, port_1: bool) -> u8 {
         let byte = self.peek_gamepad_byte(port_1);
 
@@ -135,6 +146,8 @@ impl SystemControl {
         byte
     }
 
+
+    #[inline(always)]
     pub fn peek_gamepad_byte(&self, port_1: bool) -> u8 {
         let gamepad = &self.gamepads[(!port_1) as usize];
         let mut byte = 255;

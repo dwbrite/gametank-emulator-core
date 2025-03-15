@@ -4,7 +4,7 @@ impl W65C02S {
     #[inline(always)]
     pub(crate) fn brk<S: System>(&mut self, system: &mut S) {
         let pc = self.read_pc_postincrement();
-        system.read_operand_spurious(self, pc);
+        // system.read_operand_spurious(self, pc);
         let pc = self.get_pc();
         self.push(system, (pc >> 8) as u8);
         self.push(system, pc as u8);
@@ -13,39 +13,47 @@ impl W65C02S {
         self.p |= P_I;
         self.pc = (self.pc & 0xFF00) | (system.read_vector(self, IRQ_VECTOR) as u16);
         self.pc = (self.pc & 0x00FF) | (system.read_vector(self, IRQ_VECTOR+1) as u16) << 8;
+
+        self.cycles += 7;
     }
     #[inline(always)]
     pub(crate) fn jsr<S: System>(&mut self, system: &mut S) {
         let pc = self.read_pc_postincrement();
         let target_lo = system.read_operand(self, pc);
-        self.spurious_stack_read(system);
+        // self.spurious_stack_read(system);
         self.push(system, (self.pc >> 8) as u8);
         self.push(system, self.pc as u8);
         self.check_irq_edge();
         let target_hi = system.read_operand(self, self.pc);
         self.pc = (target_hi as u16) << 8 | (target_lo as u16);
+
+        self.cycles += 6;
     }
     #[inline(always)]
     pub(crate) fn rts<S: System>(&mut self, system: &mut S) {
         let pc = self.get_pc();
-        system.read_operand_spurious(self, pc);
-        self.spurious_stack_read(system);
+        // system.read_operand_spurious(self, pc);
+        // self.spurious_stack_read(system);
         self.pc = (self.pc & 0xFF00) | self.pop(system) as u16;
         self.pc = (self.pc & 0x00FF) | (self.pop(system) as u16) << 8;
         self.check_irq_edge();
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.pc = self.pc.wrapping_add(1);
+
+        self.cycles += 5;
     }
     #[inline(always)]
     pub(crate) fn rti<S: System>(&mut self, system: &mut S) {
         let pc = self.get_pc();
-        system.read_operand_spurious(self, pc);
-        self.spurious_stack_read(system);
+        // system.read_operand_spurious(self, pc);
+        // self.spurious_stack_read(system);
         let new_p = self.pop(system);
         self.set_p(new_p);
         self.pc = (self.pc & 0xFF00) | self.pop(system) as u16;
         self.check_irq_edge();
         self.pc = (self.pc & 0x00FF) | (self.pop(system) as u16) << 8;
+
+        self.cycles += 5;
     }
     #[inline(always)]
     pub(crate) fn jmp<R: HasEA, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
@@ -59,23 +67,98 @@ impl W65C02S {
         self.check_irq_edge();
         am.write(system, self, self.a)
     }
+
+    #[inline(always)]
+    pub fn sta_zp<S: System>(&mut self, system: &mut S) {
+        let pc = self.read_pc_postincrement();
+        let addr = system.read_operand(self, pc) as u16;
+        self.check_irq_edge();
+        system.write(self, addr, self.a);
+
+        self.cycles += 2;
+    }
+    #[inline(always)]
+    pub fn sta_abs<S: System>(&mut self, system: &mut S) {
+        let pc = self.read_pc_postincrement();
+        let low = system.read_operand(self, pc);
+        let pc = self.read_pc_postincrement();
+        let high = system.read_operand(self, pc);
+        let addr = (high as u16) << 8 | (low as u16);
+        self.check_irq_edge();
+        system.write(self, addr, self.a);
+
+        self.cycles += 5;
+    }
+    #[inline(always)]
+    pub fn sta_absx<S: System>(&mut self, system: &mut S) {
+        let pc = self.read_pc_postincrement();
+        let low = system.read_operand(self, pc);
+        let pc = self.read_pc_postincrement();
+        let high = system.read_operand(self, pc);
+        let base = (high as u16) << 8 | (low as u16);
+        let addr = base.wrapping_add(self.x as u16);
+
+        if (addr & 0xFF00) != (base & 0xFF00) {
+            let pc = self.get_pc().wrapping_sub(1);
+            // system.read_spurious(self, pc); // cycle penalty
+            self.cycles += 1;
+        }
+
+        self.check_irq_edge();
+        system.write(self, addr, self.a);
+        self.cycles += 5;
+    }
+    #[inline(always)]
+    pub fn sta_indirect_y<S: System>(&mut self, system: &mut S) {
+        let pc = self.read_pc_postincrement();
+        let zp = system.read_operand(self, pc);
+        let low = system.read_pointer(self, zp as u16);
+        let high = system.read_pointer(self, zp.wrapping_add(1) as u16);
+        let base = (high as u16) << 8 | (low as u16);
+        let addr = base.wrapping_add(self.y as u16);
+
+        if (addr & 0xFF00) != (base & 0xFF00) {
+            // system.read_spurious(self, zp.wrapping_add(1) as u16); // page cross penalty
+            self.cycles += 1;
+        }
+
+        self.check_irq_edge();
+        system.write(self, addr, self.a);
+
+        self.cycles += 5;
+    }
+    #[inline(always)]
+    pub fn lda_imm<S: System>(&mut self, system: &mut S) {
+        let pc = self.read_pc_postincrement();
+        let val = system.read_operand(self, pc);
+        self.a = val;
+        self.nz_p(val);
+        self.check_irq_edge();
+
+        self.cycles += 2;
+    }
+
     #[inline(always)]
     pub(crate) fn stx<R: Writable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         let mut am = AM::get_operand(system, self);
         self.check_irq_edge();
-        am.write(system, self, self.x)
+        am.write(system, self, self.x);
+
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn sty<R: Writable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         let mut am = AM::get_operand(system, self);
         self.check_irq_edge();
-        am.write(system, self, self.y)
+        am.write(system, self, self.y);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn stz<R: Writable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         let mut am = AM::get_operand(system, self);
         self.check_irq_edge();
-        am.write(system, self, 0)
+        am.write(system, self, 0);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn lda<R: Readable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
@@ -83,6 +166,7 @@ impl W65C02S {
         self.check_irq_edge();
         self.a = am.read(system, self);
         self.nz_p(self.a);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn ldx<R: Readable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
@@ -90,6 +174,8 @@ impl W65C02S {
         self.check_irq_edge();
         self.x = am.read(system, self);
         self.nz_p(self.x);
+
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn ldy<R: Readable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
@@ -97,17 +183,20 @@ impl W65C02S {
         self.check_irq_edge();
         self.y = am.read(system, self);
         self.nz_p(self.y);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn ora<R: Readable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         self.check_irq_edge();
         self.a |= AM::get_operand(system, self).read(system, self);
-        self.nz_p(self.a)
+        self.nz_p(self.a);
+        self.cycles += 1;
     }
     pub(crate) fn and<R: Readable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         self.check_irq_edge();
         self.a &= AM::get_operand(system, self).read(system, self);
-        self.nz_p(self.a)
+        self.nz_p(self.a);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn bit<R: Readable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
@@ -116,6 +205,7 @@ impl W65C02S {
         if data & self.a == 0 { self.p = self.p | P_Z }
         else { self.p = self.p & !P_Z }
         self.p = (self.p & 0x3F) | (data & 0xC0);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn bit_i<R: Readable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
@@ -123,110 +213,128 @@ impl W65C02S {
         let data = AM::get_operand(system, self).read(system, self);
         if data & self.a == 0 { self.p = self.p | P_Z }
         else { self.p = self.p & !P_Z }
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn eor<R: Readable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         self.check_irq_edge();
         self.a ^= AM::get_operand(system, self).read(system, self);
-        self.nz_p(self.a)
+        self.nz_p(self.a);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn nop<R: Readable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         let mut am = AM::get_operand(system, self);
-        self.check_irq_edge();
-        am.read_spurious(system, self);
-    }
+        self.check_irq_edge();    }
     #[inline(always)]
     // $5C is an especially weird one
     pub(crate) fn nop_5c<R: HasEA, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         let am = AM::get_operand(system, self);
         self.check_irq_edge();
-        system.read_spurious(self, am.get_effective_address() | 0xFF00);
-        system.read_spurious(self, 0xFFFF);
-        system.read_spurious(self, 0xFFFF);
-        system.read_spurious(self, 0xFFFF);
+        // system.read_spurious(self, am.get_effective_address() | 0xFF00);
+        // system.read_spurious(self, 0xFFFF);
+        // system.read_spurious(self, 0xFFFF);
+        // system.read_spurious(self, 0xFFFF);
         self.check_irq_edge();
-        system.read_spurious(self, 0xFFFF);
+        // system.read_spurious(self, 0xFFFF);
+
+        self.cycles += 5;
     }
     #[inline(always)]
     pub(crate) fn trb<R: RMWable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         let mut am = AM::get_operand(system, self);
         let data = am.read(system, self);
-        am.read_locked_spurious(system, self);
+        // am.read_locked_spurious(system, self);
         self.check_irq_edge();
         am.write_locked(system, self, data & !self.a);
         if data & self.a != 0 { self.p &= !P_Z }
         else { self.p |= P_Z }
+
+        self.cycles += 3;
     }
     #[inline(always)]
     pub(crate) fn tsb<R: RMWable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         let mut am = AM::get_operand(system, self);
         let data = am.read(system, self);
-        am.read_locked_spurious(system, self);
+        // am.read_locked_spurious(system, self);
         self.check_irq_edge();
         am.write_locked(system, self, data | self.a);
         if data & self.a != 0 { self.p &= !P_Z }
         else { self.p |= P_Z }
+
+        self.cycles += 3;
     }
     #[inline(always)]
     pub(crate) fn asl<R: RMWable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         let mut am = AM::get_operand(system, self);
         let data = am.read(system, self);
-        am.read_locked_spurious(system, self);
+        // am.read_locked_spurious(system, self);
         let result = data << 1;
         self.check_irq_edge();
         am.write_locked(system, self, result);
         self.cnz_p(data & 0x80 != 0, result);
+
+        self.cycles += 3;
     }
     #[inline(always)]
     pub(crate) fn lsr<R: RMWable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         let mut am = AM::get_operand(system, self);
         let data = am.read(system, self);
-        am.read_locked_spurious(system, self);
+        // am.read_locked_spurious(system, self);
         let result = data >> 1;
         self.check_irq_edge();
         am.write_locked(system, self, result);
         self.cnz_p(data & 0x01 != 0, result);
+
+        self.cycles += 3;
     }
     #[inline(always)]
     pub(crate) fn rol<R: RMWable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         let mut am = AM::get_operand(system, self);
         let data = am.read(system, self);
-        am.read_locked_spurious(system, self);
+        // am.read_locked_spurious(system, self);
         let result = data << 1 | if self.p & P_C != 0 { 1 } else { 0 };
         self.check_irq_edge();
         am.write_locked(system, self, result);
         self.cnz_p(data & 0x80 != 0, result);
+
+        self.cycles += 3;
     }
     #[inline(always)]
     pub(crate) fn ror<R: RMWable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         let mut am = AM::get_operand(system, self);
         let data = am.read(system, self);
-        am.read_locked_spurious(system, self);
+        // am.read_locked_spurious(system, self);
         let result = data >> 1 | if self.p & P_C != 0 { 0x80 } else { 0 };
         self.check_irq_edge();
         am.write_locked(system, self, result);
         self.cnz_p(data & 0x01 != 0, result);
+
+        self.cycles += 3;
     }
     #[inline(always)]
     pub(crate) fn inc<R: RMWable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         let mut am = AM::get_operand(system, self);
         let data = am.read(system, self);
-        am.read_locked_spurious(system, self);
+        // am.read_locked_spurious(system, self);
         self.check_irq_edge();
         let result = data.wrapping_add(1);
         am.write_locked(system, self, result);
         self.nz_p(result);
+
+        self.cycles += 3;
     }
     #[inline(always)]
     pub(crate) fn dec<R: RMWable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
         let mut am = AM::get_operand(system, self);
         let data = am.read(system, self);
-        am.read_locked_spurious(system, self);
+        // am.read_locked_spurious(system, self);
         self.check_irq_edge();
         let result = data.wrapping_sub(1);
         am.write_locked(system, self, result);
         self.nz_p(result);
+
+        self.cycles += 3;
     }
     // note that unlike the other RMW instructions, RMBx/SMBx have THREE locked
     // cycles, not two.
@@ -234,19 +342,21 @@ impl W65C02S {
     pub(crate) fn rmb<R: RMWable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S, mask: u8) {
         let mut am = AM::get_operand(system, self);
         let data = am.read_locked(system, self);
-        am.read_locked_spurious(system, self);
+        // am.read_locked_spurious(system, self);
         let result = data & mask;
         self.check_irq_edge();
         am.write_locked(system, self, result);
+        self.cycles += 3;
     }
     #[inline(always)]
     pub(crate) fn smb<R: RMWable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S, mask: u8) {
         let mut am = AM::get_operand(system, self);
         let data = am.read_locked(system, self);
-        am.read_locked_spurious(system, self);
+        // am.read_locked_spurious(system, self);
         let result = data | mask;
         self.check_irq_edge();
         am.write_locked(system, self, result);
+        self.cycles += 3;
     }
     #[inline(always)]
     pub(crate) fn branch<R: Branchable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S, should_branch: bool) {
@@ -263,6 +373,7 @@ impl W65C02S {
         if am.read(system, self) & mask == 0 {
             self.pc = am.get_branch_target(system, self);
         }
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn bbs<R: Readable + Branchable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S, mask: u8) {
@@ -271,11 +382,13 @@ impl W65C02S {
         if am.read(system, self) & mask == mask {
             self.pc = am.get_branch_target(system, self);
         }
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn stp<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.state = State::Stopped;
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn wai<S: System>(&mut self, _: &mut S) {
@@ -283,132 +396,156 @@ impl W65C02S {
     }
     #[inline(always)]
     pub(crate) fn clc<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.p &= !P_C;
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn sec<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.p |= P_C;
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn clv<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.p &= !P_V;
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn cld<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.p &= !P_D;
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn sed<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.p |= P_D;
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn cli<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.p &= !P_I;
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn sei<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.p |= P_I;
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn php<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.check_irq_edge();
         self.push(system, self.p | P_B | P_1);
+        self.cycles += 2;
     }
     #[inline(always)]
     pub(crate) fn plp<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
-        self.spurious_stack_read(system);
+        // system.read_operand_spurious(self, self.pc);
+        // self.spurious_stack_read(system);
         self.check_irq_edge();
         let new_p = self.pop(system);
         self.set_p(new_p);
+
+        self.cycles += 3;
     }
     #[inline(always)]
     pub(crate) fn pha<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.check_irq_edge();
         self.push(system, self.a);
+        self.cycles += 2;
     }
     #[inline(always)]
     pub(crate) fn pla<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
-        self.spurious_stack_read(system);
+        // system.read_operand_spurious(self, self.pc);
+        // self.spurious_stack_read(system);
         self.check_irq_edge();
         self.a = self.pop(system);
+        self.cycles += 3;
     }
     #[inline(always)]
     pub(crate) fn phx<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.check_irq_edge();
         self.push(system, self.x);
+        self.cycles += 2;
     }
     #[inline(always)]
     pub(crate) fn plx<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
-        self.spurious_stack_read(system);
+        // system.read_operand_spurious(self, self.pc);
+        // self.spurious_stack_read(system);
         self.check_irq_edge();
         self.x = self.pop(system);
+
+        self.cycles += 3;
     }
     #[inline(always)]
     pub(crate) fn phy<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.check_irq_edge();
         self.push(system, self.y);
+
+        self.cycles += 2;
     }
     #[inline(always)]
     pub(crate) fn ply<S: System>(&mut self, system: &mut S) {
-        system.read_operand_spurious(self, self.pc);
-        self.spurious_stack_read(system);
+        // system.read_operand_spurious(self, self.pc);
+        // self.spurious_stack_read(system);
         self.check_irq_edge();
         self.y = self.pop(system);
+        self.cycles += 2;
     }
     #[inline(always)]
     pub(crate) fn tax<S: System>(&mut self, system: &mut S) {
         self.check_irq_edge();
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.x = self.a;
         self.nz_p(self.x);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn tay<S: System>(&mut self, system: &mut S) {
         self.check_irq_edge();
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.y = self.a;
         self.nz_p(self.y);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn txa<S: System>(&mut self, system: &mut S) {
         self.check_irq_edge();
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.a = self.x;
         self.nz_p(self.a);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn tya<S: System>(&mut self, system: &mut S) {
         self.check_irq_edge();
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.a = self.y;
         self.nz_p(self.a);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn txs<S: System>(&mut self, system: &mut S) {
         self.check_irq_edge();
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.s = self.x;
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn tsx<S: System>(&mut self, system: &mut S) {
         self.check_irq_edge();
-        system.read_operand_spurious(self, self.pc);
+        // system.read_operand_spurious(self, self.pc);
         self.x = self.s;
         self.nz_p(self.x);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn adc<R: Readable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
@@ -417,7 +554,8 @@ impl W65C02S {
         let red = am.read(system, self);
         let val = if (self.p & P_D) != 0 {
             self.check_irq_edge();
-            am.read_spurious(system, self);
+            // am.read_spurious(system, self);
+            self.cycles += 1;
             let mut al = (self.a & 0xF) + (red & 0xF) + if (self.p & P_C) != 0 { 1 } else { 0 };
             if al > 9 { al = ((al + 6) & 0xF) | 0x10 }
             let val = ((self.a as i8 as u16) & 0xFFF0) + ((red as i8 as u16) & 0xFFF0) + al as u16;
@@ -436,6 +574,7 @@ impl W65C02S {
         };
         self.a = val as u8;
         self.cnz_p(val >= 0x0100, val as u8);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn sbc<R: Readable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
@@ -444,7 +583,8 @@ impl W65C02S {
         let red = am.read(system, self);
         let val = if (self.p & P_D) != 0 {
             self.check_irq_edge();
-            am.read_spurious(system, self);
+            // am.read_spurious(system, self);
+            self.cycles += 1;
             let al = (self.a & 0xF).wrapping_sub(red & 0xF).wrapping_sub(if (self.p & P_C) != 0 { 0 } else { 1 });
             let mut val = (self.a as u16).wrapping_sub(red as u16).wrapping_sub(if (self.p & P_C) != 0 { 0 } else { 1 });
             if ((self.a as u16 ^ val) & (red as u16 ^ 0xFF ^ val) & 0x80) != 0 { self.p |= P_V }
@@ -470,6 +610,7 @@ impl W65C02S {
             val
         };
         self.a = val as u8;
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn cmp<R: Readable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
@@ -478,6 +619,7 @@ impl W65C02S {
         let red = am.read(system, self);
         let val = (self.a as u16) + (red as u16 ^ 0xFF) + 1;
         self.cnz_p(val >= 0x0100, val as u8);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn cpx<R: Readable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
@@ -486,6 +628,7 @@ impl W65C02S {
         let red = am.read(system, self);
         let val = (self.x as u16) + (red as u16 ^ 0xFF) + 1;
         self.cnz_p(val >= 0x0100, val as u8);
+        self.cycles += 1;
     }
     #[inline(always)]
     pub(crate) fn cpy<R: Readable, AM: AddressingMode<T= R>, S: System>(&mut self, system: &mut S) {
@@ -494,5 +637,6 @@ impl W65C02S {
         let red = am.read(system, self);
         let val = (self.y as u16) + (red as u16 ^ 0xFF) + 1;
         self.cnz_p(val >= 0x0100, val as u8);
+        self.cycles += 1;
     }
 }

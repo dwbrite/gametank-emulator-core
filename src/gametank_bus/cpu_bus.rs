@@ -4,10 +4,9 @@ use w65c02s::{System, W65C02S};
 use rand::{Rng};
 use log::{debug, warn};
 use crate::cartridges::CartridgeType;
-use crate::gametank_bus::Bus;
+use crate::gametank_bus::{aram2, Bus};
 use crate::gametank_bus::reg_system_control::*;
 use crate::inputs::GamePad;
-use crate::gametank_bus::ARAM;
 use crate::gametank_bus::cpu_bus::ByteDecorator::{AudioRam, CpuStack, SystemRam, Unreadable, Vram, ZeroPage};
 use crate::gametank_bus::reg_blitter::{BlitStart, BlitterRegisters};
 use crate::gametank_bus::reg_etc::{new_framebuffer, BankingRegister, BlitterFlags, FrameBuffer, GraphicsMemoryMap, SharedFrameBuffer};
@@ -30,9 +29,11 @@ pub enum ByteDecorator {
     Unreadable(u8),
 }
 
+// pub static mut ram_banks2: &'static mut [[u8; 0x2000]; 4] = &mut [[0; 0x2000]; 4];
+// pub static mut framebuffers: &'static mut [[u8; 0x4000]; 2] = &mut [[0x69; 0x4000]; 2];
+
 #[derive(Debug)]
 pub struct CpuBus {
-    cycles: u8,
     pub system_control: SystemControl,
     pub blitter: BlitterRegisters,
 
@@ -43,7 +44,7 @@ pub struct CpuBus {
 
     pub vram_quad_written: [bool; 32],
 
-    pub aram: Option<ARAM>,
+    // pub aram: Option<ARAM>,
     pub cartridge: CartridgeType,
 }
 
@@ -52,7 +53,6 @@ impl Default for CpuBus {
         // TODO: re-add rng to initial framebuffer?
 
         let bus = Self {
-            cycles: 0,
             system_control: SystemControl {
                 reset_acp: 0,
                 nmi_acp: 0,
@@ -79,17 +79,17 @@ impl Default for CpuBus {
             framebuffers: [new_framebuffer(0x00), new_framebuffer(0xFF)], // 128*128*2 = 32k framebuffer
             vram_banks: Box::new([[0; 256*256]; 8]), // 64k * 8 = 512k
             cartridge: CartridgeType::from_slice(CURRENT_GAME),
-            aram: Some(Box::new([0; 0x1000])), // audio ram is 2k
+            // aram: Some(Box::new([0; 0x1000])), // audio ram is 2k
             vram_quad_written: [false; 32],
         };
 
-        for p in bus.framebuffers[0].borrow_mut().iter_mut() {
+/*        for p in bus.framebuffers[0].borrow_mut().iter_mut() {
             // *p = rng.gen();
-        }
+        }*/
 
-        for p in bus.framebuffers[1].borrow_mut().iter_mut() {
-            // *p = rng.gen();
-        }
+        // for p in bus.framebuffers[1].borrow_mut().iter_mut() {
+        //     // *p = rng.gen();
+        // }
 
         bus
     }
@@ -99,6 +99,7 @@ impl CpuBus {
     pub fn read_full_framebuffer(&self) -> Ref<'_, FrameBuffer> {
         let fb = self.system_control.get_framebuffer_out();
         self.framebuffers[fb].borrow()
+        // unsafe { framebuffers.get_unchecked_mut(fb) }
     }
 
     fn update_flash_shift_register(&mut self, next_val: u8) {
@@ -127,11 +128,15 @@ impl CpuBus {
         // }
     }
 
+
+    #[inline]
     pub fn write_byte(&mut self, address: u16, data: u8) {
         match address {
             // system RAM
             0x0000..=0x1FFF => {
-                self.ram_banks[self.system_control.get_ram_bank()][address as usize] = data;
+                unsafe {
+                    *self.ram_banks.get_unchecked_mut(self.system_control.get_ram_bank()).get_unchecked_mut(address as usize) = data;
+                }
                 // println!("${:04X}={:02X}", address, data);
             }
 
@@ -154,18 +159,16 @@ impl CpuBus {
             }
 
             // audio RAM
-            0x3000..=0x3FFF => {
-                if let Some(aram) = &mut self.aram {
-                    aram[(address - 0x3000) as usize] = data;
-                }
+            0x3000..=0x3FFF => unsafe {
+                *aram2.get_unchecked_mut((address - 0x3000) as usize) = data;
             }
 
             // VRAM/Framebuffer/Blitter
             0x4000..=0x7FFF => {
                 match self.system_control.get_graphics_memory_map() {
-                    GraphicsMemoryMap::FrameBuffer => {
+                    GraphicsMemoryMap::FrameBuffer => unsafe {
                         let fb = self.system_control.banking_register.framebuffer() as usize;
-                        self.framebuffers[fb].borrow_mut()[address as usize - 0x4000] = data;
+                        *self.framebuffers.get_unchecked_mut(fb).borrow_mut().get_unchecked_mut(address as usize - 0x4000) = data;
                     }
                     GraphicsMemoryMap::VRAM => {
                         let vram_page = self.system_control.banking_register.vram_page() as usize;
@@ -185,13 +188,20 @@ impl CpuBus {
         }
     }
 
+    #[inline]
     pub fn read_byte(&mut self, address: u16) -> u8 {
-        match address {
-            // system RAM
-            0x0000..=0x1FFF => {
-                return self.ram_banks[self.system_control.get_ram_bank()][address as usize];
-            }
+        if address >= 0x8000 {
+            return self.cartridge.read_byte(address - 0x8000);
+        }
+        if address < 0x2000 {
+            return unsafe { *self.ram_banks.get_unchecked(self.system_control.get_ram_bank()).get_unchecked(address as usize) };
+        }
 
+        unsafe { self.read_byte_slow(address) }
+    }
+
+    unsafe fn read_byte_slow(&mut self, address: u16) -> u8 {
+        match address {
             // system control registers
             0x2000..=0x2009 => {
                 return self.system_control.read_byte(address);
@@ -200,14 +210,12 @@ impl CpuBus {
             // versatile interface adapter (GPIO, timers)
             0x2800..=0x280F => {
                 let register = (address & 0xF) as usize;
-                return self.system_control.via_regs[register]
+                return *self.system_control.via_regs.get_unchecked(register) ;
             }
 
             // audio RAM
             0x3000..=0x3FFF => {
-                if let Some(aram) = &mut self.aram {
-                    return aram[(address - 0x3000) as usize];
-                }
+                return *aram2.get_unchecked((address - 0x3000) as usize);
             }
 
             // VRAM/Framebuffer/Blitter
@@ -215,22 +223,17 @@ impl CpuBus {
                 match self.system_control.get_graphics_memory_map() {
                     GraphicsMemoryMap::FrameBuffer => {
                         let fb = self.system_control.banking_register.framebuffer() as usize;
-                        return self.framebuffers[fb].borrow()[address as usize - 0x4000];
+                        return *self.framebuffers.get_unchecked(fb).borrow().get_unchecked(address as usize - 0x4000);
                     }
                     GraphicsMemoryMap::VRAM => {
                         let vram_page = self.system_control.banking_register.vram_page() as usize;
                         let quadrant = self.blitter.vram_quadrant();
-                        return self.vram_banks[vram_page][address as usize - 0x4000 + quadrant*(128*128)];
+                        return *self.vram_banks.get_unchecked(vram_page).get_unchecked(address as usize - 0x4000 + quadrant * (128 * 128));
                     }
                     GraphicsMemoryMap::BlitterRegisters => {
                         return self.blitter.read_byte(address);
                     }
                 }
-            }
-
-            // Cartridge
-            0x8000..=0xFFFF => {
-                return self.cartridge.read_byte(address - 0x8000);
             }
             _ => {
                 warn!("Attempted to inaccessible memory at: ${:02X}", address);
@@ -240,33 +243,34 @@ impl CpuBus {
         0
     }
 
-    pub fn peek_byte_decorated(&self, address: u16) -> ByteDecorator {
-        match address {
-            0x0000..=0x00FF => { ZeroPage(self.ram_banks[self.system_control.get_ram_bank()][address as usize]) },
-            0x0100..=0x01FF => { CpuStack(self.ram_banks[self.system_control.get_ram_bank()][address as usize]) },
-            0x0200..=0x1FFF => { SystemRam(self.ram_banks[self.system_control.get_ram_bank()][address as usize]) },
-            0x2000..=0x2009 => { Unreadable(self.system_control.peek_byte(address)) },
-            // 0x2800..=0x280F => { Via(self.system_control.via_regs[(address & 0xF) as usize]) },
-            0x3000..=0x3FFF => { AudioRam(if let Some(aram) = &self.aram { aram[(address - 0x3000) as usize] } else { 0 }) },
-            0x4000..=0x7FFF => {
-                match self.system_control.get_graphics_memory_map() {
-                    GraphicsMemoryMap::FrameBuffer => {
-                        let fb = self.system_control.banking_register.framebuffer() as usize;
-                        ByteDecorator::Framebuffer(self.framebuffers[fb].borrow()[address as usize - 0x4000])
-                    }
-                    GraphicsMemoryMap::VRAM => {
-                        let vram_page = self.system_control.banking_register.vram_page() as usize;
-                        let quadrant = self.blitter.vram_quadrant();
-                        Vram(self.vram_banks[vram_page][address as usize - 0x4000 + quadrant*(128*128)])
-                    }
-                    GraphicsMemoryMap::BlitterRegisters => {
-                        Unreadable(0)
-                    }
-                }
-            },
-            _ => Unreadable(0),
-        }
-    }
+    #[inline(always)]
+    // pub fn peek_byte_decorated(&self, address: u16) -> ByteDecorator {
+    //     match address {
+    //         0x0000..=0x00FF => { ZeroPage(self.ram_banks[self.system_control.get_ram_bank()][address as usize]) },
+    //         0x0100..=0x01FF => { CpuStack(self.ram_banks[self.system_control.get_ram_bank()][address as usize]) },
+    //         0x0200..=0x1FFF => { SystemRam(self.ram_banks[self.system_control.get_ram_bank()][address as usize]) },
+    //         0x2000..=0x2009 => { Unreadable(self.system_control.peek_byte(address)) },
+    //         // 0x2800..=0x280F => { Via(self.system_control.via_regs[(address & 0xF) as usize]) },
+    //         0x3000..=0x3FFF => { AudioRam(if let Some(aram) = &self.aram { aram[(address - 0x3000) as usize] } else { 0 }) },
+    //         0x4000..=0x7FFF => {
+    //             match self.system_control.get_graphics_memory_map() {
+    //                 GraphicsMemoryMap::FrameBuffer => {
+    //                     let fb = self.system_control.banking_register.framebuffer() as usize;
+    //                     ByteDecorator::Framebuffer(self.framebuffers[fb].borrow()[address as usize - 0x4000])
+    //                 }
+    //                 GraphicsMemoryMap::VRAM => {
+    //                     let vram_page = self.system_control.banking_register.vram_page() as usize;
+    //                     let quadrant = self.blitter.vram_quadrant();
+    //                     Vram(self.vram_banks[vram_page][address as usize - 0x4000 + quadrant*(128*128)])
+    //                 }
+    //                 GraphicsMemoryMap::BlitterRegisters => {
+    //                     Unreadable(0)
+    //                 }
+    //             }
+    //         },
+    //         _ => Unreadable(0),
+    //     }
+    // }
 
     pub fn vblank_nmi_enabled(&self) -> bool {
         self.system_control.dma_flags.dma_nmi()
@@ -274,21 +278,15 @@ impl CpuBus {
 }
 
 impl System for CpuBus {
+
+    #[inline(always)]
     fn read(&mut self, _: &mut W65C02S, addr: u16) -> u8 {
-        self.cycles += 1;
         self.read_byte(addr)
     }
 
-    fn write(&mut self, _: &mut W65C02S, addr: u16, data: u8) {
-        self.cycles += 1;
-        self.write_byte(addr, data);
-    }
-}
 
-impl Bus for CpuBus {
-    fn clear_cycles(&mut self) -> u8 {
-        let ret = self.cycles;
-        self.cycles = 0;
-        ret
+    #[inline(always)]
+    fn write(&mut self, _: &mut W65C02S, addr: u16, data: u8) {
+        self.write_byte(addr, data);
     }
 }
