@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 //! This crate is a cycle-accurate simulator for the WDC W65C02S, the most
 //! advanced direct descendent of that catalyst of the home computer
 //! revolution, the 6502.

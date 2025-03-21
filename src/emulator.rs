@@ -2,16 +2,13 @@ use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 use w65c02s::{System, W65C02S};
-// use core::collections::HashMap;
 use log::{debug, error, info, warn};
 use w65c02s::State::AwaitingInterrupt;
 use core::fmt::{Debug, Formatter};
-// use core::fs::File;
-// use core::io::Read;
-// use core::path::PathBuf;
 use bytemuck::bytes_of;
 use heapless::{FnvIndexMap};
 use rtrb::PushError;
+use crate::audio_output::GameTankAudio;
 use crate::blitter::Blitter;
 use crate::cartridges::CartridgeType;
 use crate::emulator::PlayState::{Paused, Playing, WasmInit};
@@ -49,13 +46,8 @@ pub struct Emulator<Clock: TimeDaemon> {
     pub cpu_ns_per_cycle: f64,
     pub cpu_frequency_hz: f64,
     pub last_render_time: f64,
-
-    // TODO: acknowledge that if sample rate changes, this isn't exactly cycle accurate, and that's ok :^))
-    pub audio_producer: rtrb::Producer<u8>,
-    pub audio_sample_rate: f64,
-
-
-
+    pub audio_out: Option<GameTankAudio>,
+    pub target_sample_rate: f64,
     pub play_state: PlayState,
     pub wait_counter: u64,
 
@@ -90,20 +82,7 @@ impl <Clock: TimeDaemon> Debug for Emulator<Clock> {
             .field("last_emu_tick", &self.last_emu_tick);
 
         Ok(())
-    }
-}
-
-struct PseudoSystem;
-
-impl System for PseudoSystem {
-    fn read(&mut self, cpu: &mut W65C02S, addr: u16) -> u8 {
-        0
-    }
-
-    fn write(&mut self, cpu: &mut W65C02S, addr: u16, data: u8) {
-        // nop
-    }
-}
+    }}
 
 
 impl <Clock: TimeDaemon> Emulator<Clock> {
@@ -115,15 +94,10 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
         }
     }
 
-    pub fn init(clock: Clock, audio_producer: rtrb::Producer<u8>) -> Self {
+    pub fn init(clock: Clock, target_sample_rate: f64) -> Self {
         let play_state = WasmInit;
 
-        info!("pre-bus");
-
         let mut bus = CpuBus::default();
-
-        info!("post-bus");
-
         let mut cpu = W65C02S::new();
         cpu.step(&mut bus); // take one initial step, to get through the reset vector
         let acp = W65C02S::new();
@@ -149,10 +123,8 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
             cpu_frequency_hz,
             cpu_ns_per_cycle,
             last_render_time,
-
-            audio_producer,
-            audio_sample_rate: 0.0,
-
+            audio_out: None,
+            target_sample_rate,
             wait_counter: 0,
             input_state: Default::default(),
             clock,
@@ -220,14 +192,12 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
         self.last_emu_tick = now_ms;
 
         if !is_web && (now_ms - self.last_render_time) >= 16.67 {
-            // warn!("time since last render: {}", now_ms - self.last_render_time);
+            debug!("time since last render: {}", now_ms - self.last_render_time);
             self.last_render_time = now_ms;
         }
     }
 
     fn run_acp(&mut self, acp_cycle_accumulator: &mut i32) {
-        // self.acp_bus.aram = self.cpu_bus.aram.take();
-
         if self.cpu_bus.system_control.clear_acp_reset() {
             self.acp.reset();
         }
@@ -249,14 +219,26 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
                 self.acp_bus.irq_counter = self.cpu_bus.system_control.sample_rate() as i32 * 4;
                 self.acp.set_irq(true);
 
-                self.audio_sample_rate = self.cpu_frequency_hz / self.cpu_bus.system_control.sample_rate() as f64;
+                let sample_rate = self.cpu_frequency_hz / self.cpu_bus.system_control.sample_rate() as f64;
+                // if audio_out is none or mismatched sample rate
+                if self.audio_out.as_ref().map_or(true, |gta| gta.sample_rate != sample_rate) {
+                    warn!("recreated audio stream with new sample rate: {:.3}Hz ({})", sample_rate, self.cpu_bus.system_control.sample_rate());
+                    self.audio_out = Some(GameTankAudio::new(sample_rate, self.target_sample_rate));
+                }
 
-                if let Err(e) = self.audio_producer.push(self.acp_bus.sample) {
-                    error!("not enough slots in audio producer: {e}");
+                if let Some(audio) = &mut self.audio_out {
+                    let next_sample_u8 = self.acp_bus.sample;
+                    if let Err(e) = audio.producer.push(next_sample_u8) {
+                        error!("not enough slots in audio producer: {e}");
+                    }
+                }
+
+                if let Some(audio) = &mut self.audio_out {
+                    audio.convert_to_output_buffers();
+                    // audio.process_audio();
                 }
             }
         }
-        // self.cpu_bus.aram = self.acp_bus.aram.take();
     }
 
     fn vblank(&mut self) {
