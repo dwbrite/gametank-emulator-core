@@ -1,5 +1,7 @@
+use alloc::boxed::Box;
+use alloc::vec;
 use alloc::vec::Vec;
-use w65c02s::W65C02S;
+use w65c02s::{System, W65C02S};
 // use core::collections::HashMap;
 use log::{debug, error, info, warn};
 use w65c02s::State::AwaitingInterrupt;
@@ -63,7 +65,7 @@ pub struct Emulator<Clock: TimeDaemon> {
 }
 
 impl <Clock: TimeDaemon> Emulator<Clock> {
-    pub(crate) fn load_rom(&mut self, bytes: &[u8]) {
+    pub fn load_rom(&mut self, bytes: &[u8]) {
         warn!("loading new rom from memory, size: {}", bytes.len());
         self.cpu_bus.cartridge = CartridgeType::from_slice(bytes);
         warn!(" - cartridge loaded from memory");
@@ -88,7 +90,21 @@ impl <Clock: TimeDaemon> Debug for Emulator<Clock> {
             .field("last_emu_tick", &self.last_emu_tick);
 
         Ok(())
-    }}
+    }
+}
+
+struct PseudoSystem;
+
+impl System for PseudoSystem {
+    fn read(&mut self, cpu: &mut W65C02S, addr: u16) -> u8 {
+        0
+    }
+
+    fn write(&mut self, cpu: &mut W65C02S, addr: u16, data: u8) {
+        // nop
+    }
+}
+
 
 impl <Clock: TimeDaemon> Emulator<Clock> {
     pub fn wasm_init(&mut self) {
@@ -118,7 +134,7 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
         let cpu_frequency_hz = 3_579_545.0; // Precise frequency
         let cpu_ns_per_cycle = 1_000_000_000.0 / cpu_frequency_hz; // Nanoseconds per cycle
 
-        let last_render_time = clock.get_now_ms();
+        let last_render_time = last_cpu_tick_ms;
 
         Emulator {
             play_state,
@@ -133,7 +149,6 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
             cpu_frequency_hz,
             cpu_ns_per_cycle,
             last_render_time,
-
 
             audio_producer,
             audio_sample_rate: 0.0,
@@ -169,20 +184,19 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
                 self.wait_counter += 1;
                 // get cpu's current asm code
             } else if self.wait_counter > 0 {
-                warn!("waited {} cycles", self.wait_counter);
+                debug!("waited {} cycles", self.wait_counter);
                 self.wait_counter = 0;
             }
 
-            let _ = self.cpu.step(&mut self.cpu_bus);
+            let cpu_cycles = self.cpu.step(&mut self.cpu_bus);
 
-            let cpu_cycles = self.cpu_bus.clear_cycles() as i32;
             remaining_cycles -= cpu_cycles;
 
             acp_cycle_accumulator += cpu_cycles * 4;
 
             // pass aram to acp
             if self.cpu_bus.system_control.acp_enabled() {
-                // self.run_acp(&mut acp_cycle_accumulator);
+                self.run_acp(&mut acp_cycle_accumulator);
             }
 
             // blit
@@ -206,13 +220,13 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
         self.last_emu_tick = now_ms;
 
         if !is_web && (now_ms - self.last_render_time) >= 16.67 {
-            warn!("time since last render: {}", now_ms - self.last_render_time);
+            // warn!("time since last render: {}", now_ms - self.last_render_time);
             self.last_render_time = now_ms;
         }
     }
 
     fn run_acp(&mut self, acp_cycle_accumulator: &mut i32) {
-        self.acp_bus.aram = self.cpu_bus.aram.take();
+        // self.acp_bus.aram = self.cpu_bus.aram.take();
 
         if self.cpu_bus.system_control.clear_acp_reset() {
             self.acp.reset();
@@ -223,8 +237,9 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
         }
 
         while *acp_cycle_accumulator > 0 {
-            let _ = self.acp.step(&mut self.acp_bus);
-            *acp_cycle_accumulator -= self.acp_bus.clear_cycles() as i32;
+            let acp_cycles = self.acp.step(&mut self.acp_bus);
+            *acp_cycle_accumulator -= acp_cycles;
+            self.acp_bus.irq_counter -= acp_cycles;
 
             // clear stuff ig
             self.acp.set_irq(false);
@@ -241,7 +256,7 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
                 }
             }
         }
-        self.cpu_bus.aram = self.acp_bus.aram.take();
+        // self.cpu_bus.aram = self.acp_bus.aram.take();
     }
 
     fn vblank(&mut self) {

@@ -166,7 +166,7 @@ impl Blitter {
         };
 
         let out_x = wrapping_add(self.dst_x, self.offset_x) as usize;
-        let out_y = (self.dst_y + self.offset_y) as usize;
+        let out_y = wrapping_add(self.dst_y, self.offset_y) as usize;
         let out_fb = bus.system_control.banking_register.framebuffer() as usize;
 
         if out_x >= 128 || out_y >= 128 {
@@ -176,7 +176,7 @@ impl Blitter {
 
         // write to active framebuffer, if not transparent
         if bus.system_control.dma_flags.dma_opaque() || color != 0 {
-            bus.framebuffers[out_fb].borrow_mut()[out_x + out_y*128] = color;
+            unsafe { bus.framebuffers[out_fb].borrow_mut()[out_x + out_y*128] = color; }
         }
 
         // increment x offset

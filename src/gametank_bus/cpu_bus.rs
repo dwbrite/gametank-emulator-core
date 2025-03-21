@@ -1,17 +1,17 @@
 use alloc::boxed::Box;
 use core::cell::Ref;
-use w65c02s::{System, W65C02S};
-use rand::{Rng};
 use log::{debug, warn};
+use w65c02s::{System, W65C02S};
+use crate::cartridges::cart2m::Cartridge2M;
 use crate::cartridges::CartridgeType;
 use crate::gametank_bus::Bus;
 use crate::gametank_bus::reg_system_control::*;
-use crate::inputs::GamePad;
 use crate::gametank_bus::ARAM;
 use crate::gametank_bus::cpu_bus::ByteDecorator::{AudioRam, CpuStack, SystemRam, Unreadable, Vram, ZeroPage};
 use crate::gametank_bus::reg_blitter::{BlitStart, BlitterRegisters};
 use crate::gametank_bus::reg_etc::{new_framebuffer, BankingRegister, BlitterFlags, FrameBuffer, GraphicsMemoryMap, SharedFrameBuffer};
 use crate::gametank_bus::reg_system_control::*;
+use crate::inputs::GamePad;
 
 const CURRENT_GAME: &[u8] = include_bytes!("../cubicle.gtr");
 
@@ -43,14 +43,12 @@ pub struct CpuBus {
 
     pub vram_quad_written: [bool; 32],
 
-    pub aram: Option<ARAM>,
+    // pub aram: Option<ARAM>,
     pub cartridge: CartridgeType,
 }
 
 impl Default for CpuBus {
     fn default() -> Self {
-        // TODO: re-add rng to initial framebuffer?
-
         let bus = Self {
             cycles: 0,
             system_control: SystemControl {
@@ -75,21 +73,13 @@ impl Default for CpuBus {
                 },
                 color: 0b101_00_000, // offwhite
             },
-            ram_banks: Box::new([[0; 0x2000]; 4]), // 16k ram
-            framebuffers: [new_framebuffer(0x00), new_framebuffer(0xFF)], // 128*128*2 = 32k framebuffer
-            vram_banks: Box::new([[0; 256*256]; 8]), // 64k * 8 = 512k
+            ram_banks: Box::new([[0; 0x2000]; 4]),
+            framebuffers: [new_framebuffer(0x00), new_framebuffer(0xFF)],
+            vram_banks: Box::new([[0; 256*256]; 8]),
             cartridge: CartridgeType::from_slice(CURRENT_GAME),
-            aram: Some(Box::new([0; 0x1000])), // audio ram is 2k
+            // aram: Some(Box::new([0; 0x1000])),
             vram_quad_written: [false; 32],
         };
-
-        for p in bus.framebuffers[0].borrow_mut().iter_mut() {
-            // *p = rng.gen();
-        }
-
-        for p in bus.framebuffers[1].borrow_mut().iter_mut() {
-            // *p = rng.gen();
-        }
 
         bus
     }
@@ -102,29 +92,29 @@ impl CpuBus {
     }
 
     fn update_flash_shift_register(&mut self, next_val: u8) {
-        // match &mut self.cartridge {
-        //     CartridgeType::Cart2m(cartridge) => {
-        //         // For now, assuming that if we're using Flash2M hardware, we're behaving ourselves
-        //         let old_val = self.system_control.via_regs[VIA_IORA]; // Get the previous value from the VIA
-        //         let rising_bits = next_val & !old_val;
-        //
-        //         if rising_bits & VIA_SPI_BIT_CLK != 0 {
-        //             cartridge.bank_shifter <<= 1; // Shift left
-        //             cartridge.bank_shifter &= 0xFE; // Ensure the last bit is cleared
-        //             cartridge.bank_shifter |= ((old_val & VIA_SPI_BIT_MOSI) != 0) as u8; // Set the last bit based on MOSI
-        //         } else if rising_bits & VIA_SPI_BIT_CS != 0 {
-        //             // Flash cart CS is connected to latch clock
-        //             if (cartridge.bank_mask ^ cartridge.bank_shifter as u16) & 0x80 != 0 {
-        //                 // TODO: support saving
-        //                 // self.save_nvram(); // Assuming this is defined elsewhere or is a method within CpuBus
-        //                 warn!("Saving is not yet supported");
-        //             }
-        //             cartridge.bank_mask = cartridge.bank_shifter as u16; // Update the bank mask
-        //             debug!("Flash bank mask set to 0x{:x}", cartridge.bank_mask);
-        //         }
-        //     },
-        //     _ => {} // do nothing
-        // }
+        match &mut self.cartridge {
+            CartridgeType::Cart2m(cartridge) => {
+                // For now, assuming that if we're using Flash2M hardware, we're behaving ourselves
+                let old_val = self.system_control.via_regs[VIA_IORA]; // Get the previous value from the VIA
+                let rising_bits = next_val & !old_val;
+
+                if rising_bits & VIA_SPI_BIT_CLK != 0 {
+                    cartridge.bank_shifter <<= 1; // Shift left
+                    cartridge.bank_shifter &= 0xFE; // Ensure the last bit is cleared
+                    cartridge.bank_shifter |= ((old_val & VIA_SPI_BIT_MOSI) != 0) as u8; // Set the last bit based on MOSI
+                } else if rising_bits & VIA_SPI_BIT_CS != 0 {
+                    // Flash cart CS is connected to latch clock
+                    if (cartridge.bank_mask ^ cartridge.bank_shifter as u16) & 0x80 != 0 {
+                        // TODO: support saving
+                        // self.save_nvram(); // Assuming this is defined elsewhere or is a method within CpuBus
+                        warn!("Saving is not yet supported");
+                    }
+                    cartridge.bank_mask = cartridge.bank_shifter as u16; // Update the bank mask
+                    debug!("Flash bank mask set to 0x{:x}", cartridge.bank_mask);
+                }
+            },
+            _ => {} // do nothing
+        }
     }
 
     pub fn write_byte(&mut self, address: u16, data: u8) {
@@ -154,10 +144,8 @@ impl CpuBus {
             }
 
             // audio RAM
-            0x3000..=0x3FFF => {
-                if let Some(aram) = &mut self.aram {
-                    aram[(address - 0x3000) as usize] = data;
-                }
+            0x3000..=0x3FFF => unsafe {
+                ARAM[(address - 0x3000) as usize] = data;
             }
 
             // VRAM/Framebuffer/Blitter
@@ -178,6 +166,10 @@ impl CpuBus {
                         // println!("blitter reg write -> ${:04X}={:02X}", address, data);
                     }
                 }
+            }
+            // Cartridge
+            0x8000..=0xFFFF => {
+                self.cartridge.write_byte(address - 0x8000, data);
             }
             _ => {
                 warn!("Attempted to write read-only memory at: ${:02X}", address);
@@ -204,10 +196,8 @@ impl CpuBus {
             }
 
             // audio RAM
-            0x3000..=0x3FFF => {
-                if let Some(aram) = &mut self.aram {
-                    return aram[(address - 0x3000) as usize];
-                }
+            0x3000..=0x3FFF => unsafe {
+                return ARAM[(address - 0x3000) as usize];
             }
 
             // VRAM/Framebuffer/Blitter
@@ -227,7 +217,6 @@ impl CpuBus {
                     }
                 }
             }
-
             // Cartridge
             0x8000..=0xFFFF => {
                 return self.cartridge.read_byte(address - 0x8000);
@@ -247,7 +236,7 @@ impl CpuBus {
             0x0200..=0x1FFF => { SystemRam(self.ram_banks[self.system_control.get_ram_bank()][address as usize]) },
             0x2000..=0x2009 => { Unreadable(self.system_control.peek_byte(address)) },
             // 0x2800..=0x280F => { Via(self.system_control.via_regs[(address & 0xF) as usize]) },
-            0x3000..=0x3FFF => { AudioRam(if let Some(aram) = &self.aram { aram[(address - 0x3000) as usize] } else { 0 }) },
+            0x3000..=0x3FFF => unsafe { AudioRam(ARAM[(address - 0x3000) as usize]) },
             0x4000..=0x7FFF => {
                 match self.system_control.get_graphics_memory_map() {
                     GraphicsMemoryMap::FrameBuffer => {
@@ -275,20 +264,10 @@ impl CpuBus {
 
 impl System for CpuBus {
     fn read(&mut self, _: &mut W65C02S, addr: u16) -> u8 {
-        self.cycles += 1;
         self.read_byte(addr)
     }
 
     fn write(&mut self, _: &mut W65C02S, addr: u16, data: u8) {
-        self.cycles += 1;
         self.write_byte(addr, data);
-    }
-}
-
-impl Bus for CpuBus {
-    fn clear_cycles(&mut self) -> u8 {
-        let ret = self.cycles;
-        self.cycles = 0;
-        ret
     }
 }
