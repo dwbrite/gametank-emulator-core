@@ -356,7 +356,7 @@ impl W65C02S {
     /// Spurious push during reset.
     #[inline(always)]
     pub fn spurious_push<S: System>(&mut self, system: &mut S) {
-        system.read_stack_spurious(self, 0x100 | self.s as u16);
+        // system.read_stack_spurious(self, 0x100 | self.s as u16);
         self.s = self.s.wrapping_sub(1);
     }
     /// Pop a value from the stack using the given `System`.
@@ -369,7 +369,7 @@ impl W65C02S {
     /// a JSR or RTS or most pulls.
     #[inline(always)]
     pub fn spurious_stack_read<S: System>(&mut self, system: &mut S) {
-        system.read_spurious(self, 0x100 | (self.s as u16));
+        // system.read_spurious(self, 0x100 | (self.s as u16));
     }
     /// Change the input on the `IRQB` pin. `false` means no interrupt pending.
     /// `true` means some interrupt is pending. Note that `IRQB` is an active-
@@ -387,9 +387,7 @@ impl W65C02S {
     /// will ensue anyway.
     #[inline(always)]
     pub fn set_nmi(&mut self, nmi: bool) {
-        if !self.nmi {
-            self.nmi_edge = self.nmi_edge || (!self.nmi_edge && nmi);
-        }
+        self.nmi_edge = self.nmi_edge || (!self.nmi_edge && nmi);
         self.nmi = nmi;
     }
     /// Internal function. Updates the IRQ and NMI edge flags.
@@ -422,22 +420,22 @@ impl W65C02S {
     /// Always executes at least one bus cycle. May execute more.
     pub fn step<S: System>(&mut self, system: &mut S) -> i32 {
         match self.state {
-            State::Stopped => system.read_operand_spurious(self, self.pc),
+            State::Stopped => /*system.read_operand_spurious(self, self.pc),*/return 1,
             State::AwaitingInterrupt => {
                 if self.irq || self.nmi_edge {
                     self.state = State::Running;
-                    system.read_operand_spurious(self, self.pc);
+                    // system.read_operand_spurious(self, self.pc);
                 }
                 self.check_irq_edge();
-                system.read_operand_spurious(self, self.pc);
+                // system.read_operand_spurious(self, self.pc);
 
                 return 2;
             },
             State::HasBeenReset => {
                 // first, we spuriously read an opcode
-                system.read_opcode_spurious(self, self.pc);
+                // system.read_opcode_spurious(self, self.pc);
                 // second, we read ... the same byte, but with SYNC low
-                system.read_operand_spurious(self, self.pc);
+                // system.read_operand_spurious(self, self.pc);
                 // three spurious pushes...
                 self.spurious_push(system);
                 self.spurious_push(system);
@@ -458,8 +456,8 @@ impl W65C02S {
                     self.nmi_pending = false;
                     self.nmi_edge = false;
                     let opcode_addr = self.get_pc();
-                    system.read_opcode_spurious(self, opcode_addr);
-                    system.read_spurious(self, opcode_addr);
+                    // system.read_opcode_spurious(self, opcode_addr);
+                    // system.read_spurious(self, opcode_addr);
                     self.push(system, (opcode_addr >> 8) as u8);
                     self.push(system, opcode_addr as u8);
                     self.push(system, self.p & !P_B);
@@ -472,8 +470,8 @@ impl W65C02S {
                 else if self.irq_pending {
                     self.irq_pending = false;
                     let opcode_addr = self.get_pc();
-                    system.read_opcode_spurious(self, opcode_addr);
-                    system.read_spurious(self, opcode_addr);
+                    // system.read_opcode_spurious(self, opcode_addr);
+                    // system.read_spurious(self, opcode_addr);
                     self.push(system, (opcode_addr >> 8) as u8);
                     self.push(system, opcode_addr as u8);
                     self.push(system, self.p);

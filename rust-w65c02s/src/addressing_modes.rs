@@ -39,7 +39,7 @@ impl Readable for SimpleEA {
         system.read(cpu, self.ea)
     }
     fn read_spurious<S: System>(&mut self, system: &mut S, cpu: &mut W65C02S) {
-        system.read_spurious(cpu, self.ea)
+        // system.read_spurious(cpu, self.ea)
     }
 }
 impl Writable for SimpleEA {
@@ -52,7 +52,7 @@ impl RMWable for SimpleEA {
         system.read_locked(cpu, self.ea)
     }
     fn read_locked_spurious<S: System>(&mut self, system: &mut S, cpu: &mut W65C02S) {
-        system.read_locked_spurious(cpu, self.ea);
+        // system.read_locked_spurious(cpu, self.ea);
     }
     fn write_locked<S: System>(&mut self, system: &mut S, cpu: &mut W65C02S, data: u8) {
         system.write_locked(cpu, self.ea, data)
@@ -66,7 +66,7 @@ pub struct Implied {}
 impl AddressingMode for Implied {
     type Result = ();
     fn get_operand<S: System>(system: &mut S, cpu: &mut W65C02S) -> () {
-        system.read_operand_spurious(cpu, cpu.get_pc());
+        // system.read_operand_spurious(cpu, cpu.get_pc());
     }
 }
 pub struct FastImplied {}
@@ -97,7 +97,7 @@ impl AddressingMode for AbsoluteIndirect {
         let addr_high = system.read_operand(cpu, pc);
         let addr = (addr_high as u16) << 8 | (addr_low as u16);
         let pc = cpu.read_pc_postincrement();
-        system.read_spurious(cpu, pc);
+        // system.read_spurious(cpu, pc);
         let ea_low = system.read_pointer(cpu, addr);
         let ea_high = system.read_pointer(cpu, addr.wrapping_add(1));
         SimpleEA { ea: (ea_high as u16) << 8 | (ea_low as u16) }
@@ -116,7 +116,7 @@ impl AddressingMode for AbsoluteX {
         let ea = base.wrapping_add(cpu.get_x() as u16);
         if (ea & 0xFF00) != (base & 0xFF00) {
             let pc = cpu.get_pc().wrapping_sub(1);
-            system.read_spurious(cpu, pc);
+            // system.read_spurious(cpu, pc);
         }
         SimpleEA { ea }
     }
@@ -134,10 +134,10 @@ impl AddressingMode for AbsoluteXSlower {
         let ea = base.wrapping_add(cpu.get_x() as u16);
         if (ea & 0xFF00) != (base & 0xFF00) {
             let pc = cpu.get_pc().wrapping_sub(1);
-            system.read_spurious(cpu, pc);
+            // system.read_spurious(cpu, pc);
         }
         else {
-            system.read_spurious(cpu, ea);
+            // system.read_spurious(cpu, ea);
         }
         SimpleEA { ea }
     }
@@ -154,7 +154,7 @@ impl AddressingMode for AbsoluteXIndirect {
         let base = (base_high as u16) << 8 | (base_low as u16);
         let addr = base.wrapping_add(cpu.get_x() as u16);
         let pc = cpu.read_pc_postincrement();
-        system.read_spurious(cpu, pc);
+        // system.read_spurious(cpu, pc);
         let ea_low = system.read_pointer(cpu, addr);
         let ea_high = system.read_pointer(cpu, addr.wrapping_add(1));
         SimpleEA { ea: (ea_high as u16) << 8 | (ea_low as u16) }
@@ -173,7 +173,7 @@ impl AddressingMode for AbsoluteY {
         let ea = base.wrapping_add(cpu.get_y() as u16);
         if (ea & 0xFF00) != (base & 0xFF00) {
             let pc = cpu.get_pc().wrapping_sub(1);
-            system.read_spurious(cpu, pc);
+            // system.read_spurious(cpu, pc);
         }
         SimpleEA { ea }
     }
@@ -191,10 +191,10 @@ impl AddressingMode for AbsoluteYSlower {
         let ea = base.wrapping_add(cpu.get_y() as u16);
         if (ea & 0xFF00) != (base & 0xFF00) {
             let pc = cpu.get_pc().wrapping_sub(1);
-            system.read_spurious(cpu, pc);
+            // system.read_spurious(cpu, pc);
         }
         else {
-            system.read_spurious(cpu, ea);
+            // system.read_spurious(cpu, ea);
         }
         SimpleEA { ea }
     }
@@ -204,7 +204,7 @@ pub struct ImpliedA {}
 impl AddressingMode for ImpliedA {
     type Result = ImpliedA;
     fn get_operand<S: System>(system: &mut S, cpu: &mut W65C02S) -> ImpliedA {
-        system.read_operand_spurious(cpu, cpu.get_pc());
+        // system.read_operand_spurious(cpu, cpu.get_pc());
         ImpliedA {}
     }
 }
@@ -212,7 +212,7 @@ impl Readable for ImpliedA {
     fn read<S: System>(&mut self, _: &mut S, cpu: &mut W65C02S) -> u8 {
         cpu.get_a()
     }
-    fn read_spurious<S: System>(&mut self, _: &mut S, _: &mut W65C02S) {}
+    // fn read_spurious<S: System>(&mut self, _: &mut S, _: &mut W65C02S) {}
 }
 impl Writable for ImpliedA {
     fn write<S: System>(&mut self, _: &mut S, cpu: &mut W65C02S, data: u8) {
@@ -234,7 +234,7 @@ pub struct ImpliedX {}
 impl AddressingMode for ImpliedX {
     type Result = ImpliedX;
     fn get_operand<S: System>(system: &mut S, cpu: &mut W65C02S) -> ImpliedX {
-        system.read_operand_spurious(cpu, cpu.get_pc());
+        // system.read_operand_spurious(cpu, cpu.get_pc());
         ImpliedX {}
     }
 }
@@ -264,7 +264,7 @@ pub struct ImpliedY {}
 impl AddressingMode for ImpliedY {
     type Result = ImpliedY;
     fn get_operand<S: System>(system: &mut S, cpu: &mut W65C02S) -> ImpliedY {
-        system.read_operand_spurious(cpu, cpu.get_pc());
+        // system.read_operand_spurious(cpu, cpu.get_pc());
         ImpliedY {}
     }
 }
@@ -322,13 +322,13 @@ impl AddressingMode for Relative {
 impl Branchable for Relative {
     fn get_branch_target<S: System>(&mut self, system: &mut S, cpu: &mut W65C02S) -> u16 {
         // always burn one cycle
-        system.read_spurious(cpu, cpu.get_pc());
+        // system.read_spurious(cpu, cpu.get_pc());
         if cpu.get_pc() & 0xFF00 != self.target & 0xFF00 {
             let old_irq_pending = cpu.irq_pending;
             cpu.check_irq_edge();
             cpu.irq_pending = cpu.irq_pending | old_irq_pending;
             // another cycle burns!
-            system.read_spurious(cpu, cpu.get_pc());
+            // system.read_spurious(cpu, cpu.get_pc());
         }
         self.target
     }
@@ -345,7 +345,7 @@ impl AddressingMode for RelativeBitBranch {
         let addr = system.read_operand(cpu, pc);
         let data = system.read(cpu, addr as u16);
         // TODO: which value actually gets used?
-        system.read_spurious(cpu, addr as u16);
+        // system.read_spurious(cpu, addr as u16);
         let pc = cpu.read_pc_postincrement();
         let value = system.read_operand(cpu, pc) as i8;
         let target = cpu.get_pc().wrapping_add(value as u16);
@@ -360,13 +360,13 @@ impl Readable for RelativeBitBranch {
 impl Branchable for RelativeBitBranch {
     fn get_branch_target<S: System>(&mut self, system: &mut S, cpu: &mut W65C02S) -> u16 {
         // always burn one cycle
-        system.read_spurious(cpu, cpu.get_pc());
+        // system.read_spurious(cpu, cpu.get_pc());
         if cpu.get_pc() & 0xFF00 != self.target & 0xFF00 {
             let old_irq_pending = cpu.irq_pending;
             cpu.check_irq_edge();
             cpu.irq_pending = cpu.irq_pending | old_irq_pending;
             // another cycle burns!
-            system.read_spurious(cpu, cpu.get_pc());
+            // system.read_spurious(cpu, cpu.get_pc());
         }
         self.target
     }
@@ -401,7 +401,7 @@ impl AddressingMode for ZeroPageX {
         let pc = cpu.read_pc_postincrement();
         let base = system.read_operand(cpu, pc);
         let ea = base.wrapping_add(cpu.get_x()) as u16;
-        system.read_spurious(cpu, cpu.get_pc().wrapping_sub(1));
+        // system.read_spurious(cpu, cpu.get_pc().wrapping_sub(1));
         SimpleEA { ea }
     }
 }
@@ -413,7 +413,7 @@ impl AddressingMode for ZeroPageXIndirect {
         let pc = cpu.read_pc_postincrement();
         let base = system.read_operand(cpu, pc);
         let addr = base.wrapping_add(cpu.get_x());
-        system.read_spurious(cpu, cpu.get_pc().wrapping_sub(1));
+        // system.read_spurious(cpu, cpu.get_pc().wrapping_sub(1));
         let ea_low = system.read_pointer(cpu, addr as u16);
         let ea_high = system.read_pointer(cpu, addr.wrapping_add(1) as u16);
         SimpleEA { ea: (ea_high as u16) << 8 | (ea_low as u16) }
@@ -427,7 +427,7 @@ impl AddressingMode for ZeroPageY {
         let pc = cpu.read_pc_postincrement();
         let base = system.read_operand(cpu, pc);
         let ea = base.wrapping_add(cpu.get_y()) as u16;
-        system.read_spurious(cpu, cpu.get_pc().wrapping_sub(1));
+        // system.read_spurious(cpu, cpu.get_pc().wrapping_sub(1));
         SimpleEA { ea }
     }
 }
@@ -443,7 +443,7 @@ impl AddressingMode for ZeroPageIndirectY {
         let addr = (addr_high as u16) << 8 | (addr_low as u16);
         let ea = addr.wrapping_add(cpu.get_y() as u16);
         if ea & 0xFF00 != addr & 0xFF00 {
-            system.read_spurious(cpu, base.wrapping_add(1) as u16);
+            // system.read_spurious(cpu, base.wrapping_add(1) as u16);
         }
         SimpleEA { ea }
     }
@@ -459,7 +459,7 @@ impl AddressingMode for ZeroPageIndirectYSlower {
         let addr_high = system.read_pointer(cpu, base.wrapping_add(1) as u16);
         let addr = (addr_high as u16) << 8 | (addr_low as u16);
         let ea = addr.wrapping_add(cpu.get_y() as u16);
-        system.read_spurious(cpu, base.wrapping_add(1) as u16);
+        // system.read_spurious(cpu, base.wrapping_add(1) as u16);
         SimpleEA { ea }
     }
 }

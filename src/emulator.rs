@@ -184,7 +184,7 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
                 self.wait_counter += 1;
                 // get cpu's current asm code
             } else if self.wait_counter > 0 {
-                warn!("waited {} cycles", self.wait_counter);
+                debug!("waited {} cycles", self.wait_counter);
                 self.wait_counter = 0;
             }
 

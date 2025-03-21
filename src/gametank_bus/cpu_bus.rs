@@ -167,6 +167,10 @@ impl CpuBus {
                     }
                 }
             }
+            // Cartridge
+            0x8000..=0xFFFF => {
+                self.cartridge.write_byte(address - 0x8000, data);
+            }
             _ => {
                 warn!("Attempted to write read-only memory at: ${:02X}", address);
             }
@@ -213,7 +217,6 @@ impl CpuBus {
                     }
                 }
             }
-
             // Cartridge
             0x8000..=0xFFFF => {
                 return self.cartridge.read_byte(address - 0x8000);

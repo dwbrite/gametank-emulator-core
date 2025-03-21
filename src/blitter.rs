@@ -166,7 +166,7 @@ impl Blitter {
         };
 
         let out_x = wrapping_add(self.dst_x, self.offset_x) as usize;
-        let out_y = (self.dst_y + self.offset_y) as usize;
+        let out_y = wrapping_add(self.dst_y, self.offset_y) as usize;
         let out_fb = bus.system_control.banking_register.framebuffer() as usize;
 
         if out_x >= 128 || out_y >= 128 {
