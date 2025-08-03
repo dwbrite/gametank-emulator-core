@@ -31,6 +31,7 @@ pub struct SystemControl {
 
     // has effects on the rest of the system
     pub banking_register: BankingRegister,
+    pub cached_ram_bank: usize,
 
     pub via_regs: [u8; 16],
 
@@ -43,7 +44,7 @@ pub struct SystemControl {
 impl SystemControl {
     #[inline(always)]
     pub fn get_ram_bank(&self) -> usize {
-        self.banking_register.ram_bank() as usize
+        self.cached_ram_bank
     }
 
     #[inline(always)]
@@ -94,7 +95,8 @@ impl SystemControl {
             0x2001 => { self.nmi_acp = data }
             0x2005 => {
                 debug!("setting banking register to {:08b}", data);
-                self.banking_register.0 = data
+                self.banking_register.0 = data;
+                self.cached_ram_bank = self.banking_register.ram_bank() as usize;
             }
             0x2006 => { self.audio_enable_sample_rate = data }
             0x2007 => { self.dma_flags.0 = data }

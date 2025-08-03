@@ -29,8 +29,9 @@ pub enum ByteDecorator {
     Unreadable(u8),
 }
 
-// pub static mut ram_banks2: &'static mut [[u8; 0x2000]; 4] = &mut [[0; 0x2000]; 4];
-// pub static mut framebuffers: &'static mut [[u8; 0x4000]; 2] = &mut [[0x69; 0x4000]; 2];
+pub static mut ram_banks2: [[u8; 0x2000]; 4] = [[0; 0x2000]; 4];
+pub static mut framebuffers: [[u8; 0x4000]; 2] = [[0x69; 0x4000]; 2];
+// pub static mut vram_banks: [[u8; 256*256]; 8] = [[0; 256*256]; 8];
 
 #[derive(Debug)]
 pub struct CpuBus {
@@ -38,8 +39,8 @@ pub struct CpuBus {
     pub blitter: BlitterRegisters,
 
     // heap allocations to prevent stackoverflow, esp on web
-    pub ram_banks: Box<[[u8; 0x2000]; 4]>,
-    pub framebuffers: [SharedFrameBuffer; 2],
+    // pub ram_banks: Box<[[u8; 0x2000]; 4]>,
+    // pub framebuffers: [SharedFrameBuffer; 2],
     pub vram_banks: Box<[[u8; 256*256]; 8]>,
 
     pub vram_quad_written: [bool; 32],
@@ -57,6 +58,7 @@ impl Default for CpuBus {
                 reset_acp: 0,
                 nmi_acp: 0,
                 banking_register: BankingRegister(0),
+                cached_ram_bank: 0,
                 via_regs: [0; 16],
                 audio_enable_sample_rate: 0,
                 dma_flags: BlitterFlags(0b0111_1111),
@@ -75,8 +77,8 @@ impl Default for CpuBus {
                 },
                 color: 0b101_00_000, // offwhite
             },
-            ram_banks: Box::new([[0; 0x2000]; 4]), // 16k ram
-            framebuffers: [new_framebuffer(0x00), new_framebuffer(0xFF)], // 128*128*2 = 32k framebuffer
+            // ram_banks: Box::new([[0; 0x2000]; 4]), // 16k ram
+            // framebuffers: [new_framebuffer(0x00), new_framebuffer(0xFF)], // 128*128*2 = 32k framebuffer
             vram_banks: Box::new([[0; 256*256]; 8]), // 64k * 8 = 512k
             cartridge: CartridgeType::from_slice(CURRENT_GAME),
             // aram: Some(Box::new([0; 0x1000])), // audio ram is 2k
@@ -96,10 +98,10 @@ impl Default for CpuBus {
 }
 
 impl CpuBus {
-    pub fn read_full_framebuffer(&self) -> Ref<'_, FrameBuffer> {
+    pub fn read_full_framebuffer(&self) -> &[u8; 128*128] {
         let fb = self.system_control.get_framebuffer_out();
-        self.framebuffers[fb].borrow()
-        // unsafe { framebuffers.get_unchecked_mut(fb) }
+        // self.framebuffers[fb].borrow()
+        unsafe { framebuffers.get_unchecked_mut(fb) }
     }
 
     fn update_flash_shift_register(&mut self, next_val: u8) {
@@ -135,7 +137,7 @@ impl CpuBus {
             // system RAM
             0x0000..=0x1FFF => {
                 unsafe {
-                    *self.ram_banks.get_unchecked_mut(self.system_control.get_ram_bank()).get_unchecked_mut(address as usize) = data;
+                    *ram_banks2.get_unchecked_mut(self.system_control.get_ram_bank()).get_unchecked_mut(address as usize) = data;
                 }
                 // println!("${:04X}={:02X}", address, data);
             }
@@ -160,15 +162,15 @@ impl CpuBus {
 
             // audio RAM
             0x3000..=0x3FFF => unsafe {
-                *aram2.get_unchecked_mut((address - 0x3000) as usize) = data;
+                *aram2.get_unchecked_mut((address & 0x0FFF) as usize) = data;
             }
 
             // VRAM/Framebuffer/Blitter
-            0x4000..=0x7FFF => {
+            0x4000..=0x7FFF => unsafe {
                 match self.system_control.get_graphics_memory_map() {
                     GraphicsMemoryMap::FrameBuffer => unsafe {
                         let fb = self.system_control.banking_register.framebuffer() as usize;
-                        *self.framebuffers.get_unchecked_mut(fb).borrow_mut().get_unchecked_mut(address as usize - 0x4000) = data;
+                        *framebuffers.get_unchecked_mut(fb).get_unchecked_mut(address as usize - 0x4000) = data;
                     }
                     GraphicsMemoryMap::VRAM => {
                         let vram_page = self.system_control.banking_register.vram_page() as usize;
@@ -194,13 +196,13 @@ impl CpuBus {
             return self.cartridge.read_byte(address - 0x8000);
         }
         if address < 0x2000 {
-            return unsafe { *self.ram_banks.get_unchecked(self.system_control.get_ram_bank()).get_unchecked(address as usize) };
+            return unsafe { *ram_banks2.get_unchecked(self.system_control.get_ram_bank()).get_unchecked(address as usize) };
         }
 
         unsafe { self.read_byte_slow(address) }
     }
 
-    unsafe fn read_byte_slow(&mut self, address: u16) -> u8 {
+    unsafe fn read_byte_slow(&mut elf, address: u16) -> u8 {
         match address {
             // system control registers
             0x2000..=0x2009 => {
@@ -223,7 +225,7 @@ impl CpuBus {
                 match self.system_control.get_graphics_memory_map() {
                     GraphicsMemoryMap::FrameBuffer => {
                         let fb = self.system_control.banking_register.framebuffer() as usize;
-                        return *self.framebuffers.get_unchecked(fb).borrow().get_unchecked(address as usize - 0x4000);
+                        return *framebuffers.get_unchecked(fb).get_unchecked(address as usize - 0x4000);
                     }
                     GraphicsMemoryMap::VRAM => {
                         let vram_page = self.system_control.banking_register.vram_page() as usize;

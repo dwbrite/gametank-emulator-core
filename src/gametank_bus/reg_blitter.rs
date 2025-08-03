@@ -32,27 +32,32 @@ pub struct BlitterRegisters {
 impl BlitterRegisters {
     #[inline(always)]
     pub fn vram_quadrant(&self) -> usize {
-        let mut quadrant = 0;
-
-        if self.gx >= 128 {
-            quadrant += 1
-        }
-
-        if self.gy >= 128 {
-            quadrant += 2
-        }
-
-        quadrant
+        (((self.gy >> 7) << 1) | (self.gx >> 7)) as usize
+        // let mut quadrant = 0;
+        //
+        // if self.gx >= 128 {
+        //     quadrant += 1
+        // }
+        //
+        // if self.gy >= 128 {
+        //     quadrant += 2
+        // }
+        //
+        // quadrant
     }
 
     #[inline(always)]
     pub fn read_byte(&mut self, address: u16) -> u8 {
-        match address {
-            0x4006 => { self.start.addressed = true; }
-            _ => warn!("Attempted to read from unreadable memory at: ${:02X}", address)
-        }
-
+        if address == 0x4006 { self.start.addressed = true; }
         0
+
+        //
+        // match address {
+        //     0x4006 => { self.start.addressed = true; }
+        //     _ => warn!("Attempted to read from unreadable memory at: ${:02X}", address)
+        // }
+        //
+        // 0
     }
 
     #[inline(always)]

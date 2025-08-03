@@ -1,6 +1,6 @@
 use core::intrinsics::{add_with_overflow, wrapping_add};
 use log::{debug, info, warn};
-use crate::gametank_bus::{CpuBus};
+use crate::gametank_bus::{framebuffers, CpuBus};
 
 #[derive(Debug)]
 pub struct Blitter {
@@ -162,7 +162,9 @@ impl Blitter {
                 quad += 128*128;
             }
 
-            bus.vram_banks[vram_page][blit_src_x + blit_src_y*128 + quad]
+            unsafe {
+                bus.vram_banks[vram_page][blit_src_x + blit_src_y*128 + quad]
+            }
         };
 
         let out_x = wrapping_add(self.dst_x, self.offset_x) as usize;
@@ -176,7 +178,7 @@ impl Blitter {
 
         // write to active framebuffer, if not transparent
         if bus.system_control.dma_flags.dma_opaque() || color != 0 {
-            unsafe { *bus.framebuffers.get_unchecked_mut(out_fb).borrow_mut().get_unchecked_mut(out_x + out_y*128) = color; }
+            unsafe { *framebuffers.get_unchecked_mut(out_fb).get_unchecked_mut(out_x + out_y*128) = color; }
         }
 
         // increment x offset

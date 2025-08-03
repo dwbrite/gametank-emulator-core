@@ -230,7 +230,7 @@ pub struct W65C02S {
     nmi: bool, nmi_edge: bool, nmi_pending: bool,
 }
 
-pub static OPCODE_CYCLES: [i32; 256]= [
+pub const OPCODE_CYCLES: [i32; 256]= [
     7, 6, 2, 0, 5, 3, 5, 5, 2, 3, 4, 0, 7, 5, 7, 7,
     3, 5, 5, 0, 5, 4, 6, 5, 1, 5, 4, 0, 7, 5, 7, 7,
     6, 6, 2, 0, 3, 3, 5, 5, 3, 3, 4, 0, 5, 5, 7, 7,
