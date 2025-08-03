@@ -235,7 +235,7 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
 
                 if let Some(audio) = &mut self.audio_out {
                     audio.convert_to_output_buffers();
-                    // audio.process_audio();
+                    audio.process_audio();
                 }
             }
         }
@@ -275,17 +275,21 @@ impl <Clock: TimeDaemon> Emulator<Clock> {
                     }
                 }
                 SoftReset => {
-                    self.cpu.reset();
+                    if self.input_state[key] == JustReleased {
+                        self.cpu.reset();
+                    }
                 }
                 HardReset => {
-                    // hard reset reinitializes memory/cpus
-                    let cart = self.cpu_bus.cartridge.clone();
-                    self.cpu_bus = CpuBus::default();
-                    self.cpu_bus.cartridge = cart;
-                    self.cpu = W65C02S::new();
-                    self.cpu.step(&mut self.cpu_bus); // take one initial step, to get through the reset vector
-                    self.acp = W65C02S::new();
-                    self.blitter = Blitter::default();
+                    if self.input_state[key] == JustReleased {
+                        // hard reset reinitializes memory/cpus
+                        let cart = self.cpu_bus.cartridge.clone();
+                        self.cpu_bus = CpuBus::default();
+                        self.cpu_bus.cartridge = cart;
+                        self.cpu = W65C02S::new();
+                        self.cpu.step(&mut self.cpu_bus); // take one initial step, to get through the reset vector
+                        self.acp = W65C02S::new();
+                        self.blitter = Blitter::default();
+                    }
                 }
             }
             self.input_state.insert(*key, self.input_state[key].update()).expect("shit's full dog ://");
