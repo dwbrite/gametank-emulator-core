@@ -7,7 +7,7 @@ license = "MIT"
 
 [dependencies]
 # emulation
-w65c02s = { path = "rust-w65c02s" }
+gte-w65c02s = { version = "0.9.3" }
 
 rand = { version = "0.8", default-features = false, features = ["alloc"] }
 rand_core = { version = "0.6", default-features = false }

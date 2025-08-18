@@ -1,9 +1,9 @@
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
-use w65c02s::{System, W65C02S};
+use gte_w65c02s::{System, W65C02S};
 use log::{debug, error, info, warn};
-use w65c02s::State::AwaitingInterrupt;
+use gte_w65c02s::State::AwaitingInterrupt;
 use core::fmt::{Debug, Formatter};
 use bytemuck::bytes_of;
 use heapless::{FnvIndexMap};

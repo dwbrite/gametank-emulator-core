@@ -162,14 +162,20 @@ dependencies = [
  "dasp_graph",
  "dasp_interpolate",
  "dasp_signal",
+ "gte-w65c02s",
  "heapless",
  "log",
  "petgraph",
  "rand",
  "rand_core",
  "rtrb",
- "w65c02s",
 ]
+
+[[package]]
+name = "gte-w65c02s"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f74b29a43a0bb0de337df619d8b44009097c2a41160e251b08d92d79d4246e7"
 
 [[package]]
 name = "hash32"
@@ -248,7 +254,3 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
-
-[[package]]
-name = "w65c02s"
-version = "0.9.2"

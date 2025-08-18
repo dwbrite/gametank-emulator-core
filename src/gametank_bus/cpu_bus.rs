@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use core::cell::Ref;
 use log::{debug, warn};
-use w65c02s::{System, W65C02S};
+use gte_w65c02s::{System, W65C02S};
 use crate::cartridges::cart2m::Cartridge2M;
 use crate::cartridges::CartridgeType;
 use crate::gametank_bus::Bus;

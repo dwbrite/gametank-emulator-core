@@ -2,7 +2,7 @@
 
 use alloc::boxed::Box;
 use log::{error};
-use w65c02s::{System, W65C02S};
+use gte_w65c02s::{System, W65C02S};
 use crate::gametank_bus::Bus;
 
 pub static mut ARAM: &'static mut [u8; 0x1000]  = &mut [0; 0x1000];
