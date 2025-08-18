@@ -40,11 +40,6 @@ impl Signal for GameTankSignal {
 
 pub struct GameTankAudio {
     pub producer: Producer<u8>,
-    //
-    // klingt: Klingt<GTNode>,
-    //
-    // idx_in: NodeIndex,
-    // idx_out: NodeIndex,
 
     pub resampled: VecDeque<f32>,
 

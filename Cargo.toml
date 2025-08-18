@@ -1,7 +1,8 @@
 [package]
-name = "gametank-emulator-core"
+name = "gte-core"
 version = "0.1.0"
 edition = "2021"
+description = "Core of the GameTank Rust Emulator"
 
 [dependencies]
 # emulation
