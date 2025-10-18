@@ -1,5 +1,6 @@
+use core::mem::transmute;
+
 use alloc::boxed::Box;
-use core::intrinsics::transmute;
 use crate::cartridges::Cartridge;
 
 

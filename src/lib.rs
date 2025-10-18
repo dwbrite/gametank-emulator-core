@@ -1,5 +1,4 @@
 #![no_std]
-#![feature(core_intrinsics)]
 #![allow(clippy::disallowed_methods, clippy::single_match)]
 #![allow(dead_code, unused_variables, unused_imports, internal_features, static_mut_refs)]
 extern crate alloc;

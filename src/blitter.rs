@@ -1,4 +1,3 @@
-use core::intrinsics::{add_with_overflow, wrapping_add};
 use log::{debug, info, warn};
 use crate::gametank_bus::{CpuBus};
 
@@ -165,8 +164,8 @@ impl Blitter {
             bus.vram_banks[vram_page][blit_src_x + blit_src_y*128 + quad]
         };
 
-        let out_x = wrapping_add(self.dst_x, self.offset_x) as usize;
-        let out_y = wrapping_add(self.dst_y, self.offset_y) as usize;
+        let out_x = self.dst_x.wrapping_add(self.offset_x) as usize;
+        let out_y = self.dst_y.wrapping_add(self.offset_y) as usize;
         let out_fb = bus.system_control.banking_register.framebuffer() as usize;
 
         if out_x >= 128 || out_y >= 128 {
