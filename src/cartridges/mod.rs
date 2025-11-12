@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_variables, unused_imports, internal_features, static_mut_refs)]
 
 pub mod cart8k;
+pub mod cart16k;
 pub mod cart32k;
 pub mod cart2m;
 
@@ -8,6 +9,7 @@ use alloc::boxed::Box;
 use log::error;
 use crate::cartridges::cart2m::Cartridge2M;
 use crate::cartridges::cart8k::Cartridge8K;
+use crate::cartridges::cart16k::Cartridge16K;
 use crate::cartridges::cart32k::{Cartridge32K};
 
 pub trait Cartridge {
@@ -21,6 +23,7 @@ pub trait Cartridge {
 #[derive(Debug, Clone)]
 pub enum CartridgeType {
     Cart8k(Cartridge8K),
+    Cart16k(Cartridge16K),
     Cart32k(Cartridge32K),
     Cart2m(Box<Cartridge2M>),
 }
@@ -30,6 +33,9 @@ impl CartridgeType {
         match slice.len() {
             0x2000 => {
                 CartridgeType::Cart8k(Cartridge8K::from_slice(slice))
+            }
+            0x4000 => {
+                CartridgeType::Cart16k(Cartridge16K::from_slice(slice))
             }
             0x8000 => {
                 CartridgeType::Cart32k(Cartridge32K::from_slice(slice))
@@ -47,6 +53,7 @@ impl CartridgeType {
     pub fn read_byte(&self, address: u16) -> u8 {
         match self {
             CartridgeType::Cart8k(c) => {c.read_byte(address)}
+            CartridgeType::Cart16k(c) => {c.read_byte(address)}
             CartridgeType::Cart32k(c) => {c.read_byte(address)}
             CartridgeType::Cart2m(c) => {c.read_byte(address)}
         }
